@@ -118,3 +118,26 @@ export interface SlidePreview {
   title: string;
   texts: string[];
 }
+
+/** 可选组件状态（Pandoc / LibreOffice） */
+export interface ComponentStatus {
+  name: string;
+  label: string;
+  found: boolean;
+  version: string;
+  path: string;
+}
+
+/** 转换前预检结果 */
+export interface ConversionPrecheck {
+  ok: boolean;
+  blocked: string | null;
+  warnings: string[];
+}
+
+/** 转换结果 */
+export interface ConvertResult {
+  mdRelativePath: string;
+  mediaRelativeDir: string;
+  mediaCount: number;
+}

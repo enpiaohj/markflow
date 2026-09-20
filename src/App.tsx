@@ -63,6 +63,8 @@ function Shell() {
           ) : viewerFile && current ? (
             viewerFile.kind === "pdf" ? (
               <PdfViewer />
+            ) : viewerFile.kind === "hifi" ? (
+              <PdfViewer external={{ bytes: viewerFile.bytes ?? new ArrayBuffer(0), title: viewerFile.relativePath }} />
             ) : (
               <OfficePreviewPane />
             )

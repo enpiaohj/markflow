@@ -12,6 +12,7 @@ import {
   Star,
   TriangleAlert,
 } from "lucide-react";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
@@ -87,6 +88,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  */
 export default function LibraryView() {
   const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer } = useLibrary();
+  const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -183,6 +185,28 @@ export default function LibraryView() {
   function handleSelect(entry: FileEntry) {
     setSelected(entry);
     if (entry.isDir) setCurrentDir(entry.relativePath);
+  }
+
+  async function startImport() {
+    if (!current) return;
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [
+        { name: "可导入文件", extensions: ["docx", "html", "htm", "md", "markdown", "txt", "png", "jpg", "jpeg", "csv", "json", "yaml", "yml"] },
+        { name: "所有文件", extensions: ["*"] },
+      ],
+    });
+    if (!selected || Array.isArray(selected)) return;
+    setImporting(true);
+    try {
+      const importedPath = await api.importFile(current.id, currentDir, selected);
+      // 导入后跳到目标目录（列表会随重扫完成自动刷新）
+      setCurrentDir(importedPath.includes("/") ? importedPath.slice(0, importedPath.lastIndexOf("/")) : "");
+    } catch (err) {
+      alert(`导入失败：${err}`);
+    } finally {
+      setImporting(false);
+    }
   }
 
   function toggleSort(key: SortKey) {
@@ -310,12 +334,13 @@ export default function LibraryView() {
             </button>
             <button
               type="button"
-              disabled
-              title="将在后续迭代实现"
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-400"
+              disabled={importing || !current}
+              title="选择本地文件导入当前目录：DOCX/HTML 自动转为 Markdown 副本，其余原样复制"
+              onClick={() => void startImport()}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50 disabled:opacity-40"
             >
               <Import className="h-3.5 w-3.5" />
-              导入文件
+              {importing ? "导入中…" : "导入文件"}
             </button>
           </div>
           <span className="text-xs text-gray-400">{sortedList.length} 项</span>

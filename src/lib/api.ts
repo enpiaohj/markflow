@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ComponentStatus,
+  ConversionPrecheck,
+  ConvertResult,
   CreateLibraryRequest,
   FileEntry,
   OfficePreview,
@@ -121,4 +124,30 @@ export function readFileBytes(libraryId: string, relativePath: string): Promise<
 
 export function openPathInSystem(libraryId: string, relativePath: string): Promise<void> {
   return invoke("open_path_in_system", { libraryId, relativePath });
+}
+
+// ---------------------------------------------------------------------------
+// 转换与导入（v0.3 第二批）
+// ---------------------------------------------------------------------------
+
+export function listComponents(): Promise<ComponentStatus[]> {
+  return invoke("list_components");
+}
+
+export function docxPrecheck(libraryId: string, relativePath: string): Promise<ConversionPrecheck> {
+  return invoke("docx_precheck", { libraryId, relativePath });
+}
+
+export function convertDocxToMarkdown(libraryId: string, relativePath: string): Promise<ConvertResult> {
+  return invoke("convert_docx_to_markdown", { libraryId, relativePath });
+}
+
+/** LibreOffice 高保真预览：返回 PDF 字节 */
+export function convertOfficeToPdf(libraryId: string, relativePath: string): Promise<ArrayBuffer> {
+  return invoke("convert_office_to_pdf", { libraryId, relativePath });
+}
+
+/** 导入外部文件：DOCX/HTML 转 Markdown，其余原样复制；返回入库后的相对路径 */
+export function importFile(libraryId: string, targetDir: string, sourcePath: string): Promise<string> {
+  return invoke("import_file", { libraryId, targetDir, sourcePath });
 }
