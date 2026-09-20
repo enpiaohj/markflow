@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 后台任务中心（§8.16 首批）：任务管理器登记扫描/自动重扫任务，
+  实时进度（已处理条目数）、取消（扫描循环检查取消旗标）、完成摘要、
+  失败原因与历史清理（内存保留 100 条，持久化随 OCR/AI/导出任务交付）；
+  「任务」视图 + 状态栏「N 个任务运行中」入口 + `tasks:updated` 事件。
+- 性能 Spike（§17.1 第 1 项）：5 万混合文件库生成 → 扫描+提取+FTS5 索引 →
+  中文关键词全文检索 → 文件名检索 → 全量重建 的完整实测
+  （`cargo test --profile spike spike_50k -- --ignored --nocapture`）。
 - 文档库核心（v0.1 第一批功能）：
   - Rust 侧格式注册表（17 类格式 + 回退）、SQLite 索引库（libraries / files 表）、
     目录扫描（默认与自定义排除规则、隐藏项跳过、数量上限保护）与后台扫描事件。

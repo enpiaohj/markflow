@@ -1,11 +1,13 @@
-import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, ListTodo, Loader2 } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
+import { useTasks } from "./TasksContext";
 
 /**
- * 底部状态栏：当前库、索引进度与本地优先提示（对应概念图主界面底部）。
+ * 底部状态栏：当前库、索引进度、后台任务与本地优先提示（对应概念图主界面底部）。
  */
 export default function StatusBar() {
-  const { current, scanStatus } = useLibrary();
+  const { current, scanStatus, requestTasksView } = useLibrary();
+  const { runningCount } = useTasks();
 
   let scanNode: React.ReactNode;
   if (!current) {
@@ -41,6 +43,16 @@ export default function StatusBar() {
         <span>本地优先 · 文件保存在原位置</span>
       </div>
       <div className="flex items-center gap-3">
+        {runningCount > 0 && (
+          <button
+            type="button"
+            onClick={requestTasksView}
+            className="flex items-center gap-1.5 text-primary-600 hover:text-primary-700"
+          >
+            <ListTodo className="h-3 w-3" />
+            {runningCount} 个任务运行中
+          </button>
+        )}
         <span>v0.1.0</span>
       </div>
     </footer>
