@@ -139,7 +139,17 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
             file_id UNINDEXED, name, body, tokenize='trigram'
-        );",
+        );
+        CREATE TABLE IF NOT EXISTS file_versions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_id    TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            size          INTEGER NOT NULL,
+            content       TEXT NOT NULL,
+            created_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_versions_lib_path_time
+            ON file_versions(library_id, relative_path, created_at DESC);",
     )
 }
 
@@ -411,7 +421,13 @@ fn collect_scan_rows(
 
 /// 提取单个文本文件的正文并写入提取表与 FTS（调用方负责事务）。
 fn extract_and_index(conn: &Connection, root: &Path, file_id: i64, row: &ScanRow) {
-    let (status, text) = match std::fs::read(root.join(&row.relative_path)) {
+    index_file_content(conn, &root.join(&row.relative_path), file_id, &row.name);
+}
+
+/// 按磁盘当前内容重建单个文件的提取记录与 FTS 行。
+pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i64, name: &str) {
+    let _ = clear_extraction(conn, file_id);
+    let (status, text) = match std::fs::read(file_path) {
         Ok(bytes) if bytes.len() as u64 > MAX_EXTRACT_BYTES => ("too_large".to_string(), None),
         Ok(bytes) => ("ok".to_string(), Some(String::from_utf8_lossy(&bytes).to_string())),
         Err(_) => ("read_error".to_string(), None),
@@ -423,9 +439,23 @@ fn extract_and_index(conn: &Connection, root: &Path, file_id: i64, row: &ScanRow
     if let Some(body) = text {
         let _ = conn.execute(
             "INSERT INTO search_fts (file_id, name, body) VALUES (?1, ?2, ?3)",
-            params![file_id, row.name, body],
+            params![file_id, name, body],
         );
     }
+}
+
+fn clear_extraction(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM extracted_content WHERE file_id = ?1", params![file_id])?;
+    conn.execute("DELETE FROM search_fts WHERE file_id = ?1", params![file_id])?;
+    Ok(())
+}
+
+pub(crate) fn file_mtime(path: &Path) -> i64 {
+    std::fs::metadata(path).ok().map(|m| mtime_ms(&m)).unwrap_or(0)
+}
+
+pub(crate) fn now_millis() -> i64 {
+    now_ms()
 }
 
 fn insert_rows(conn: &Connection, library_id: &str, root: &Path, rows: &[ScanRow]) -> Result<usize, String> {

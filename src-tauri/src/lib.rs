@@ -1,10 +1,11 @@
+mod editor;
 mod format;
 mod library;
 mod tasks;
 mod watch;
 
 use library::{AppState, CreateLibraryRequest};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use watch::WatchState;
 
 /// 返回应用基础信息，供前端关于信息使用。
@@ -133,6 +134,87 @@ fn clear_finished_tasks(
     removed
 }
 
+/// 读取可编辑文本文件（返回内容与冲突检测基线）。
+#[tauri::command]
+fn read_text_file(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<editor::TextFileContent, String> {
+    editor::read_text_file(&state.0.lock().unwrap(), &library_id, &relative_path)
+}
+
+/// 保存文本文件：冲突检测 → 自动快照 → 原子写入 → 索引更新。保存后发送 `file:saved`。
+#[tauri::command]
+fn save_text_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+    content: String,
+    base_mtime: i64,
+    force: bool,
+) -> Result<editor::SaveOutcome, String> {
+    let outcome = editor::save_text_file(
+        &state.0.lock().unwrap(),
+        &library_id,
+        &relative_path,
+        &content,
+        base_mtime,
+        force,
+    );
+    if outcome.is_ok() {
+        let _ = app.emit(
+            "file:saved",
+            serde_json::json!({
+                "libraryId": library_id,
+                "relativePath": relative_path,
+            }),
+        );
+    }
+    outcome
+}
+
+#[tauri::command]
+fn list_file_versions(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<Vec<editor::VersionInfo>, String> {
+    editor::list_file_versions(&state.0.lock().unwrap(), &library_id, &relative_path)
+}
+
+#[tauri::command]
+fn list_recent_versions(
+    state: State<'_, AppState>,
+    library_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<editor::VersionInfo>, String> {
+    editor::list_recent_versions(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(100))
+}
+
+/// 恢复历史版本（恢复前自动快照当前内容）。完成后发送 `file:saved`。
+#[tauri::command]
+fn restore_file_version(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+    version_id: i64,
+) -> Result<editor::SaveOutcome, String> {
+    let outcome = editor::restore_file_version(&state.0.lock().unwrap(), &library_id, &relative_path, version_id);
+    if outcome.is_ok() {
+        let _ = app.emit(
+            "file:saved",
+            serde_json::json!({
+                "libraryId": library_id,
+                "relativePath": relative_path,
+            }),
+        );
+    }
+    outcome
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -159,6 +241,11 @@ pub fn run() {
             list_tasks,
             cancel_task,
             clear_finished_tasks,
+            read_text_file,
+            save_text_file,
+            list_file_versions,
+            list_recent_versions,
+            restore_file_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

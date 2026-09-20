@@ -53,3 +53,15 @@ export function formatTime(ms: number): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/** 支持在 MarkFlow 中直接编辑的格式（与 Rust TEXT_FORMATS 一致） */
+export const EDITABLE_FORMATS: ReadonlySet<string> = new Set([
+  "markdown",
+  "text",
+  "code",
+  "json",
+  "yaml",
+  "xml",
+  "config",
+  "csv",
+]);

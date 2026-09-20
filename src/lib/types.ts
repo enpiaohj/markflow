@@ -79,3 +79,24 @@ export interface TaskInfo {
   createdAt: number;
   updatedAt: number;
 }
+
+/** 文本文件读取结果（含冲突检测基线） */
+export interface TextFileContent {
+  content: string;
+  baseMtime: number;
+  size: number;
+}
+
+/** 保存/恢复结果 */
+export interface SaveOutcome {
+  mtime: number;
+  size: number;
+}
+
+/** 历史快照 */
+export interface VersionInfo {
+  id: number;
+  relativePath: string | null;
+  size: number;
+  createdAt: number;
+}

@@ -38,6 +38,8 @@ interface LibraryContextValue {
   contentVersion: number;
   /** 搜索结果点击后的聚焦请求：文档库视图跳转并选中该文件 */
   focusFile: { relativePath: string; nonce: number } | null;
+  /** 当前在编辑器中打开的文件；null 表示编辑器关闭 */
+  openFile: { relativePath: string; nonce: number } | null;
   openWizard: () => void;
   closeWizard: () => void;
   requestSearchView: () => void;
@@ -52,6 +54,10 @@ interface LibraryContextValue {
   closeCurrentLibrary: () => void;
   /** 聚焦到文档库中的某个文件（父目录 + 选中详情） */
   requestFocusFile: (relativePath: string) => void;
+  /** 在编辑器中打开文本文件 */
+  openInEditor: (relativePath: string) => void;
+  /** 关闭编辑器，返回文档库视图 */
+  closeFile: () => void;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
@@ -67,6 +73,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [viewRequest, setViewRequest] = useState(INITIAL_VIEW);
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
+  const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -106,6 +113,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         );
         setContentVersion((v) => v + 1);
         void refreshLibraries();
+      }),
+    );
+    unlisteners.push(
+      listen<{ libraryId: string; relativePath: string }>("file:saved", () => {
+        setContentVersion((v) => v + 1);
       }),
     );
     unlisteners.push(
@@ -187,6 +199,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       viewRequest,
       contentVersion,
       focusFile,
+      openFile,
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
       requestSearchView,
@@ -201,8 +214,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         api.setWatchedLibrary("").catch(() => {});
       },
       requestFocusFile,
+      openInEditor: (relativePath: string) => {
+        setFocusFile(null);
+        setOpenFile({ relativePath, nonce: Date.now() });
+      },
+      closeFile: () => setOpenFile(null),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;
