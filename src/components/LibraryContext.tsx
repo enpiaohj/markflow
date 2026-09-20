@@ -40,6 +40,8 @@ interface LibraryContextValue {
   focusFile: { relativePath: string; nonce: number } | null;
   /** 当前在编辑器中打开的文件；null 表示编辑器关闭 */
   openFile: { relativePath: string; nonce: number } | null;
+  /** 正式交付中心是否打开 */
+  deliveryOpen: boolean;
   /** 当前在只读查看器中打开的文件（PDF / Office 快速预览 / LibreOffice 高保真） */
   viewerFile: {
     relativePath: string;
@@ -70,6 +72,8 @@ interface LibraryContextValue {
   openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi", bytes?: ArrayBuffer) => void;
   /** 关闭查看器 */
   closeViewer: () => void;
+  openDelivery: () => void;
+  closeDelivery: () => void;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
@@ -86,6 +90,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
   const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<{
     relativePath: string;
     kind: "pdf" | "office" | "hifi";
@@ -218,6 +223,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       contentVersion,
       focusFile,
       openFile,
+      deliveryOpen,
       viewerFile,
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
@@ -243,8 +249,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
       },
       closeViewer: () => setViewerFile(null),
+      openDelivery: () => {
+        setOpenFile(null);
+        setDeliveryOpen(true);
+      },
+      closeDelivery: () => setDeliveryOpen(false),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, deliveryOpen, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

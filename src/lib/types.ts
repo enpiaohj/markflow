@@ -207,3 +207,39 @@ export interface CheckIssue {
   code: string;
   message: string;
 }
+
+// ---------------------------------------------------------------------------
+// 正式交付中心（v0.5）
+// ---------------------------------------------------------------------------
+
+export interface SourceFile {
+  relativePath: string;
+  sha256: string;
+  size: number;
+}
+
+export interface PrecheckIssue {
+  relativePath: string;
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+}
+
+export interface PrecheckReport {
+  canProceed: boolean;
+  files: SourceFile[];
+  issues: PrecheckIssue[];
+}
+
+export interface DeliveryRecord {
+  id: string;
+  libraryId: string;
+  sources: SourceFile[];
+  formats: string[];
+  targetDir: string;
+  outputDir: string | null;
+  status: "running" | "completed" | "failed";
+  error: string | null;
+  outputs: string[];
+  createdAt: number;
+}

@@ -153,7 +153,21 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS settings (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        );",
+        );
+        CREATE TABLE IF NOT EXISTS export_jobs (
+            id            TEXT PRIMARY KEY,
+            library_id    TEXT NOT NULL,
+            sources_json  TEXT NOT NULL,
+            formats_json  TEXT NOT NULL,
+            target_dir    TEXT NOT NULL,
+            output_dir    TEXT,
+            status        TEXT NOT NULL,
+            error         TEXT,
+            outputs_json  TEXT NOT NULL DEFAULT '[]',
+            created_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_export_jobs_lib
+            ON export_jobs(library_id, created_at DESC);",
     )
 }
 

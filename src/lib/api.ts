@@ -9,8 +9,10 @@ import type {
   ConvertResult,
   CreateLibraryRequest,
   FileEntry,
+  PrecheckReport,
   ProviderConfig,
   ProviderSaveRequest,
+  DeliveryRecord,
   OfficePreview,
   LibraryMeta,
   QuickScanResult,
@@ -208,4 +210,29 @@ export function createTextFile(
 
 export function listLibraryFiles(libraryId: string, limit = 500): Promise<FileEntry[]> {
   return invoke("list_library_files", { libraryId, limit });
+}
+
+// ---------------------------------------------------------------------------
+// 正式交付中心（v0.5）
+// ---------------------------------------------------------------------------
+
+export function deliveryPrecheck(libraryId: string, sources: string[]): Promise<PrecheckReport> {
+  return invoke("delivery_precheck", { libraryId, sources });
+}
+
+export function deliveryStart(
+  libraryId: string,
+  sources: string[],
+  formats: string[],
+  targetDir: string,
+): Promise<DeliveryRecord> {
+  return invoke("delivery_start", { libraryId, sources, formats, targetDir });
+}
+
+export function listDeliveryHistory(libraryId: string, limit = 50): Promise<DeliveryRecord[]> {
+  return invoke("list_delivery_history", { libraryId, limit });
+}
+
+export function openDirectory(path: string): Promise<void> {
+  return invoke("open_directory", { path });
 }

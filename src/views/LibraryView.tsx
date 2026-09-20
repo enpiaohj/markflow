@@ -9,6 +9,7 @@ import {
   Import,
   Link2,
   Loader2,
+  ShieldCheck,
   Star,
   TriangleAlert,
 } from "lucide-react";
@@ -87,7 +88,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer } = useLibrary();
+  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery } = useLibrary();
   const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
@@ -341,6 +342,16 @@ export default function LibraryView() {
             >
               <Import className="h-3.5 w-3.5" />
               {importing ? "导入中…" : "导入文件"}
+            </button>
+            <button
+              type="button"
+              disabled={!current}
+              title="正式交付中心：多格式导出与交付历史"
+              onClick={openDelivery}
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-primary-700 disabled:opacity-40"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              交付
             </button>
           </div>
           <span className="text-xs text-gray-400">{sortedList.length} 项</span>

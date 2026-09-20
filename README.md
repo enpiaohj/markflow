@@ -35,7 +35,9 @@ Ctrl+S 原子保存、外部冲突检测、历史快照与一键恢复）、
 **转换与导入**（Pandoc：DOCX→可编辑 Markdown 副本、DOCX/HTML 导入；
 可选 LibreOffice 高保真预览；组件健康状态）、
 **AI 工作台**（OpenAI 兼容 Provider、密钥入凭据库、上下文门禁与敏感扫描、
-流式引用问答、AI 润色差异审阅、文档质量检查）。
+流式引用问答、AI 润色差异审阅、文档质量检查）、
+**正式交付中心**（质量门禁预检、来源 SHA-256 冻结、MD/HTML/DOCX/PDF/ZIP
+多格式管线、原子落盘、交付历史）。
 详见 [CHANGELOG](CHANGELOG.md)。
 
 ## 系统要求
