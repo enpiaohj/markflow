@@ -36,7 +36,7 @@ function WindowButton({
  * 窗口在 tauri.conf.json 中配置为 decorations: false。
  */
 export default function TitleBar() {
-  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary } = useLibrary();
+  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView } = useLibrary();
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function handleSwitch(id: string) {
@@ -148,21 +148,20 @@ export default function TitleBar() {
         )}
       </div>
 
-      {/* 全局搜索入口（占位） */}
+      {/* 全局搜索入口：点击或 Ctrl+K 进入搜索视图 */}
       <div className="flex flex-1 justify-center">
-        <div className="flex h-8 w-[420px] max-w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400">
+        <button
+          type="button"
+          onClick={requestSearchView}
+          title="搜索文件名与正文（Ctrl + K）"
+          className="flex h-8 w-[420px] max-w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400 hover:border-gray-300 hover:bg-white"
+        >
           <Search className="h-4 w-4 shrink-0" />
-          <input
-            type="text"
-            readOnly
-            placeholder="搜索文档、内容、标签…"
-            title="全局搜索将在 v0.2 实现"
-            className="w-full cursor-default bg-transparent outline-none placeholder:text-gray-400"
-          />
+          <span className="min-w-0 flex-1 truncate text-left">搜索文档、内容、标签…</span>
           <kbd className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400">
             Ctrl + K
           </kbd>
-        </div>
+        </button>
       </div>
 
       {/* 窗口控制 */}

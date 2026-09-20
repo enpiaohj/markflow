@@ -4,6 +4,7 @@ import type {
   FileEntry,
   LibraryMeta,
   QuickScanResult,
+  SearchHit,
 } from "./types";
 
 export function appInfo(): Promise<{ name: string; version: string }> {
@@ -39,4 +40,17 @@ export function listChildren(libraryId: string, relativePath: string): Promise<F
 
 export function getFileDetail(libraryId: string, relativePath: string): Promise<FileEntry> {
   return invoke("get_file_detail", { libraryId, relativePath });
+}
+
+export function searchLibrary(
+  libraryId: string,
+  query: string,
+  limit = 50,
+): Promise<SearchHit[]> {
+  return invoke("search_library", { libraryId, query, limit });
+}
+
+/** libraryId 传空字符串表示停止监听 */
+export function setWatchedLibrary(libraryId: string): Promise<void> {
+  return invoke("set_watched_library", { libraryId });
 }

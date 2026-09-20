@@ -86,7 +86,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, scanStatus, openWizard } = useLibrary();
+  const { current, scanStatus, openWizard, contentVersion, focusFile } = useLibrary();
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -107,7 +107,7 @@ export default function LibraryView() {
     [],
   );
 
-  // 切换文档库 / 扫描完成 → 重置并加载根目录
+  // 切换文档库 / 扫描完成 / 文件监听重扫 → 重置并加载根目录
   useEffect(() => {
     if (!current) return;
     let cancelled = false;
@@ -124,7 +124,25 @@ export default function LibraryView() {
     return () => {
       cancelled = true;
     };
-  }, [current, scanStatus.phase, loadDir]);
+  }, [current, scanStatus.phase, contentVersion, loadDir]);
+
+  // 搜索结果点击聚焦：跳到文件所在目录并选中
+  useEffect(() => {
+    if (!current || !focusFile) return;
+    let cancelled = false;
+    api
+      .getFileDetail(current.id, focusFile.relativePath)
+      .then((detail) => {
+        if (!cancelled) {
+          setCurrentDir(detail.parentPath);
+          setSelected(detail);
+        }
+      })
+      .catch((err) => console.error("定位文件失败", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [current, focusFile]);
 
   // 进入目录 → 加载该目录子项作为中央列表
   useEffect(() => {
