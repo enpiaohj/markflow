@@ -1,58 +1,96 @@
-import { FolderOpen, FolderPlus } from "lucide-react";
+import { FolderOpen, FolderPlus, Clock } from "lucide-react";
+import { useLibrary } from "../components/LibraryContext";
+import { formatTime } from "../lib/format";
 
-function ActionCard({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: typeof FolderPlus;
-  title: string;
-  description: string;
-}) {
-  return (
-    <button
-      type="button"
-      title="建库向导将在 v0.1 后续迭代实现"
-      className="group w-56 rounded-xl border border-gray-200 bg-white p-5 text-left shadow-sm transition-colors hover:border-primary-200 disabled:cursor-default"
-    >
-      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
-        <Icon className="h-5 w-5" />
-      </span>
-      <span className="mt-3 block text-[15px] font-semibold text-gray-900">{title}</span>
-      <span className="mt-1 block text-[13px] leading-relaxed text-gray-500">{description}</span>
-      <span className="mt-3 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">
-        v0.1 迭代中
-      </span>
-    </button>
-  );
-}
-
-/** 「开始」页：最近文档库与快速动作（当前为骨架占位） */
+/** 「开始」页：最近文档库与快速动作 */
 export default function HomeView() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center px-6">
-      <img src="/markflow.svg" alt="" className="h-14 w-14" draggable={false} />
-      <h1 className="mt-4 text-2xl font-bold text-gray-900">MarkFlow</h1>
-      <p className="mt-2 text-sm text-gray-500">
-        多格式本地文档库 · 专业写作 · AI 协作 · 正式交付
-      </p>
+  const { libraries, current, switchToLibrary, openWizard } = useLibrary();
 
-      <div className="mt-8 flex gap-4">
-        <ActionCard
-          icon={FolderPlus}
-          title="创建文档库"
-          description="选择本地文件夹，配置索引与 OCR 策略，文件保持原位置。"
-        />
-        <ActionCard
-          icon={FolderOpen}
-          title="打开文档库"
-          description="打开已有的 MarkFlow 文档库或 Obsidian Vault。"
-        />
+  return (
+    <div className="mx-auto flex h-full max-w-3xl flex-col px-6 py-10">
+      <div className="flex items-center gap-4">
+        <img src="/markflow.svg" alt="" className="h-12 w-12" draggable={false} />
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">MarkFlow</h1>
+          <p className="mt-0.5 text-[13px] text-gray-500">
+            多格式本地文档库 · 专业写作 · AI 协作 · 正式交付
+          </p>
+        </div>
       </div>
 
-      <p className="mt-10 max-w-md text-center text-xs leading-relaxed text-gray-400">
-        当前为 v0.1 工程骨架。功能将按《产品设计与技术实施方案》沿
-        文档库 → 编辑 → 搜索 → AI → 交付 的主线逐步交付。
+      <div className="mt-6 flex gap-3">
+        <button
+          type="button"
+          onClick={openWizard}
+          className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
+        >
+          <FolderPlus className="h-4 w-4" />
+          创建文档库
+        </button>
+        {libraries.length > 0 && (
+          <button
+            type="button"
+            disabled={!current}
+            title={current ? undefined : "请先在下方选择一个文档库"}
+            onClick={() => current && void switchToLibrary(current.id)}
+            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <FolderOpen className="h-4 w-4" />
+            打开当前库
+          </button>
+        )}
+      </div>
+
+      <p className="mb-3 mt-9 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+        <Clock className="h-4 w-4 text-gray-400" />
+        最近文档库（{libraries.length}）
+      </p>
+      {libraries.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 px-6 py-10 text-center">
+          <p className="text-sm text-gray-500">还没有文档库</p>
+          <p className="mt-1 text-xs leading-relaxed text-gray-400">
+            创建文档库后，MarkFlow 会以普通文件夹为基础建立统一索引，
+            <br />
+            文件保持原位置、无需上传。
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+          {libraries.map((lib) => (
+            <li key={lib.id}>
+              <button
+                type="button"
+                onClick={() => void switchToLibrary(lib.id)}
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-primary-50/50 ${
+                  current?.id === lib.id ? "bg-primary-50/60" : ""
+                }`}
+              >
+                <FolderOpen className="h-5 w-5 shrink-0 text-amber-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-gray-900">
+                    {lib.name}
+                    {current?.id === lib.id && (
+                      <span className="ml-2 rounded bg-primary-100 px-1.5 py-0.5 text-[11px] font-normal text-primary-700">
+                        当前
+                      </span>
+                    )}
+                  </span>
+                  <span className="block truncate text-xs text-gray-400">{lib.rootPath}</span>
+                </span>
+                <span className="shrink-0 text-right text-xs text-gray-400">
+                  <span className="block">{lib.fileCount.toLocaleString()} 个文件</span>
+                  <span className="block">{formatTime(lib.lastOpenedAt)}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-auto pt-8 text-center text-xs leading-relaxed text-gray-400">
+        当前为 v0.1：文档库核心（建库、扫描索引、浏览）已就绪。
+        <br />
+        原生编辑与全文搜索将按 v0.1–v0.5 路线逐步交付。
       </p>
     </div>
   );
