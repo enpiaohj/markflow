@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/*
+ * MarkFlow 设计令牌
+ * 参考《01-产品设计/UI概念设计图》：浅色主题，主色 blue-600
+ */
+@theme {
+  --font-sans: "Microsoft YaHei", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* 桌面应用质感：正文区域默认不选中文本，输入框内恢复选择 */
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
