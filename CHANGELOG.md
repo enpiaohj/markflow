@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 转换与导入（v0.3 第二批，§5.3 / §8.13 / §10.3）：
+  - 组件管理器：探测 Pandoc / LibreOffice 的路径与版本（设置页实时展示健康状态）；
+  - DOCX → Markdown 可编辑副本（Pandoc 3.11 sidecar，参数数组调用 + 60s 超时）：
+    转换前预检（加密/损坏阻断；宏、修订、批注风险提示）→ 知情确认 → 副本写入源目录
+    （附件进同名 .media）→ 自动重扫入索引 → 直接打开编辑；原文件永不修改；
+  - LibreOffice 高保真预览（可选组件，条件显示）：headless 转 PDF（独立 Profile、
+    禁交互、120s 超时、临时目录用后即清），未安装时自动降级为提取文本预览；
+  - 「导入文件」：DOCX/HTML 自动转 Markdown 入库，其余格式原样复制（同名不覆盖）。
+  - 本机已安装 Pandoc 3.11；LibreOffice 按设计定位为用户按需安装的可选组件。
+  - Rust 测试新增至 20 项（预检阻断/风险、真实 Pandoc 转换、LibreOffice 环境自适配）。
+
 - PDF 阅读与 Office 快速预览（v0.3 首批）：
   - PDF.js 阅读器：Canvas 渲染、翻页、缩放、跨页文本搜索（命中页码点击定位），
     文件经二进制 IPC 读取且必须已登记在文档库索引中；

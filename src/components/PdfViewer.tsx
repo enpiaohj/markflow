@@ -22,7 +22,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  * 页面渲染 / 翻页 / 缩放 / 跨页文本搜索定位。
  * 批注与 OCR 按 §8.8 / §8.10 路线后续交付。
  */
-export default function PdfViewer() {
+export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffer; title: string } }) {
   const { current, viewerFile, closeViewer } = useLibrary();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const docRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -38,10 +38,33 @@ export default function PdfViewer() {
   const [searching, setSearching] = useState(false);
   const [hitPages, setHitPages] = useState<number[] | null>(null);
 
-  const rel = viewerFile?.relativePath ?? "";
+  const rel = external?.title ?? viewerFile?.relativePath ?? "";
 
-  // 加载文档
+  // 加载文档：外部字节（高保真预览）或库内文件
   useEffect(() => {
+    if (external) {
+      let disposed = false;
+      setLoading(true);
+      setError("");
+      pdfjsLib
+        .getDocument({ data: new Uint8Array(external.bytes) })
+        .promise.then((doc) => {
+          if (disposed) return;
+          docRef.current = doc;
+          setNumPages(doc.numPages);
+          setPage(1);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (!disposed) {
+            setError(String(err));
+            setLoading(false);
+          }
+        });
+      return () => {
+        disposed = true;
+      };
+    }
     if (!current || !viewerFile || viewerFile.kind !== "pdf") return;
     let cancelled = false;
     setLoading(true);

@@ -1,3 +1,5 @@
+mod component_manager;
+mod convert;
 mod editor;
 mod format;
 mod library;
@@ -6,6 +8,7 @@ mod tasks;
 mod watch;
 
 use library::{AppState, CreateLibraryRequest};
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use watch::WatchState;
 
@@ -187,6 +190,194 @@ fn open_path_in_system(
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
 }
 
+/// 可选组件（Pandoc / LibreOffice）健康状态。
+#[tauri::command]
+fn list_components() -> Vec<component_manager::ComponentStatus> {
+    component_manager::list_components()
+}
+
+/// DOCX 转换前预检（加密/宏/修订/批注）。
+#[tauri::command]
+fn docx_precheck(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<convert::ConversionPrecheck, String> {
+    let path = library_file_path(&state, &library_id, &relative_path)?;
+    Ok(convert::precheck_docx(&path))
+}
+
+/// DOCX → Markdown 可编辑副本（Pandoc sidecar）：原文件不动，
+/// 副本写入源目录；完成后全量重扫并让文件监听接管。
+#[tauri::command]
+fn convert_docx_to_markdown(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    relative_path: String,
+) -> Result<convert::ConvertResult, String> {
+    let Some(pandoc) = component_manager::detect_pandoc() else {
+        return Err("未检测到 Pandoc 组件，请在设置中查看组件状态并安装后重试。".into());
+    };
+    let (root, format) = {
+        let conn = state.0.lock().unwrap();
+        let meta = library::get_library(&conn, &library_id)?;
+        let format: String = conn
+            .query_row(
+                "SELECT format FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0",
+                rusqlite::params![library_id, relative_path],
+                |row| row.get(0),
+            )
+            .map_err(|_| "文件不存在于文档库索引")?;
+        (meta.root_path, format)
+    };
+    if format != "word" {
+        return Err("仅 Word（DOCX）支持转换为可编辑副本".into());
+    }
+    let src = std::path::Path::new(&root).join(&relative_path);
+    let dest_dir = src.parent().ok_or("源文件路径无效")?.to_path_buf();
+
+    let task_id = tasks.begin(
+        tasks::TaskKind::Scan,
+        &format!("转换为可编辑副本 · {}", relative_path.rsplit('/').next().unwrap_or(&relative_path)),
+    );
+    tasks::emit_tasks(&app, &tasks);
+    let result = convert::convert_to_markdown(&pandoc, &src, &dest_dir, "docx");
+    match &result {
+        Ok(out) => tasks.finish(
+            &task_id,
+            tasks::TaskStatus::Completed,
+            Some(format!("生成 {}（附件 {} 个）", out.md_relative_path, out.media_count)),
+            None,
+        ),
+        Err(e) => tasks.finish(&task_id, tasks::TaskStatus::Failed, None, Some(e.clone())),
+    }
+    tasks::emit_tasks(&app, &tasks);
+
+    let out = result?;
+
+    // 副本入库：全量重扫（复用任务中心的扫描任务与事件）
+    let meta = library::get_library(&state.0.lock().unwrap(), &library_id)?;
+    library::spawn_full_scan(
+        app,
+        state.inner().clone(),
+        tasks.inner().clone(),
+        meta.id.clone(),
+        meta.name.clone(),
+        meta.root_path.clone().into(),
+        library::excludes_from(&meta.settings),
+    );
+    Ok(out)
+}
+
+/// LibreOffice 高保真预览：Office → PDF 字节（临时目录隔离，用后即清）。
+#[tauri::command]
+fn convert_office_to_pdf(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let Some(soffice) = component_manager::detect_soffice() else {
+        return Err("未检测到 LibreOffice 组件。安装 LibreOffice 后即可使用高保真预览（当前为提取文本快速预览）。".into());
+    };
+    let path = library_file_path(&state, &library_id, &relative_path)?;
+    let bytes = convert::office_to_pdf_bytes(&soffice, &path)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 导入外部文件：DOCX/HTML 转 Markdown 副本（附件随迁），其余格式原样复制进库。
+#[tauri::command]
+fn import_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    target_dir: String,
+    source_path: String,
+) -> Result<String, String> {
+    let Some(pandoc) = component_manager::detect_pandoc() else {
+        return Err("未检测到 Pandoc 组件，DOCX/HTML 导入转 Markdown 需要该组件；其他格式导入不受影响。".into());
+    };
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let src = PathBuf::from(&source_path);
+    if !src.is_file() {
+        return Err(format!("源文件不存在: {source_path}"));
+    }
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let dest_dir = if target_dir.is_empty() {
+        PathBuf::from(&root)
+    } else {
+        PathBuf::from(&root).join(&target_dir)
+    };
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建目标目录失败: {e}"))?;
+
+    let task_id = tasks.begin(
+        tasks::TaskKind::Scan,
+        &format!("导入 · {}", src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+    );
+    tasks::emit_tasks(&app, &tasks);
+
+    let import_result = (|| -> Result<String, String> {
+        match ext.as_str() {
+            "docx" => {
+                let out = convert::convert_to_markdown(&pandoc, &src, &dest_dir, "docx")?;
+                Ok(out.md_relative_path)
+            }
+            "html" | "htm" => {
+                let out = convert::convert_to_markdown(&pandoc, &src, &dest_dir, "html")?;
+                Ok(out.md_relative_path)
+            }
+            _ => {
+                let name = src.file_name().ok_or("源文件名无效")?;
+                let mut dest = dest_dir.join(name);
+                // 同名冲突：追加时间戳，不覆盖库内已有文件
+                if dest.exists() {
+                    let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                    let ext2 = src.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+                    dest = dest_dir.join(format!("{stem}-导入{}",
+                        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
+                    dest.set_extension(ext2.trim_start_matches('.'));
+                }
+                std::fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {e}"))?;
+                Ok(dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+            }
+        }
+    })();
+
+    match &import_result {
+        Ok(name) => tasks.finish(&task_id, tasks::TaskStatus::Completed, Some(format!("已导入 {name}")), None),
+        Err(e) => tasks.finish(&task_id, tasks::TaskStatus::Failed, None, Some(e.clone())),
+    }
+    tasks::emit_tasks(&app, &tasks);
+
+    let imported_name = import_result?;
+    let meta = library::get_library(&state.0.lock().unwrap(), &library_id)?;
+    library::spawn_full_scan(
+        app,
+        state.inner().clone(),
+        tasks.inner().clone(),
+        meta.id.clone(),
+        meta.name.clone(),
+        meta.root_path.clone().into(),
+        library::excludes_from(&meta.settings),
+    );
+    Ok(if target_dir.is_empty() { imported_name } else { format!("{target_dir}/{imported_name}") })
+}
+
+fn library_file_path(
+    state: &State<'_, AppState>,
+    library_id: &str,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), library_id)?.root_path;
+    Ok(PathBuf::from(root).join(relative_path))
+}
+
 /// 读取可编辑文本文件（返回内容与冲突检测基线）。
 #[tauri::command]
 fn read_text_file(
@@ -299,6 +490,11 @@ pub fn run() {
             get_office_preview,
             read_file_bytes,
             open_path_in_system,
+            list_components,
+            docx_precheck,
+            convert_docx_to_markdown,
+            convert_office_to_pdf,
+            import_file,
             list_file_versions,
             list_recent_versions,
             restore_file_version,

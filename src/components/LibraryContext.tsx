@@ -40,8 +40,14 @@ interface LibraryContextValue {
   focusFile: { relativePath: string; nonce: number } | null;
   /** 当前在编辑器中打开的文件；null 表示编辑器关闭 */
   openFile: { relativePath: string; nonce: number } | null;
-  /** 当前在只读查看器中打开的文件（PDF / Office 快速预览） */
-  viewerFile: { relativePath: string; kind: "pdf" | "office"; nonce: number } | null;
+  /** 当前在只读查看器中打开的文件（PDF / Office 快速预览 / LibreOffice 高保真） */
+  viewerFile: {
+    relativePath: string;
+    kind: "pdf" | "office" | "hifi";
+    nonce: number;
+    /** hifi 模式：LibreOffice 转出的 PDF 字节 */
+    bytes?: ArrayBuffer;
+  } | null;
   openWizard: () => void;
   closeWizard: () => void;
   requestSearchView: () => void;
@@ -61,7 +67,7 @@ interface LibraryContextValue {
   /** 关闭编辑器，返回文档库视图 */
   closeFile: () => void;
   /** 在只读查看器中打开文件 */
-  openInViewer: (relativePath: string, kind: "pdf" | "office") => void;
+  openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi", bytes?: ArrayBuffer) => void;
   /** 关闭查看器 */
   closeViewer: () => void;
 }
@@ -80,7 +86,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
   const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
-  const [viewerFile, setViewerFile] = useState<{ relativePath: string; kind: "pdf" | "office"; nonce: number } | null>(null);
+  const [viewerFile, setViewerFile] = useState<{
+    relativePath: string;
+    kind: "pdf" | "office" | "hifi";
+    nonce: number;
+    bytes?: ArrayBuffer;
+  } | null>(null);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -227,9 +238,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setOpenFile({ relativePath, nonce: Date.now() });
       },
       closeFile: () => setOpenFile(null),
-      openInViewer: (relativePath: string, kind: "pdf" | "office") => {
+      openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi", bytes?: ArrayBuffer) => {
         setOpenFile(null);
-        setViewerFile({ relativePath, kind, nonce: Date.now() });
+        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
       },
       closeViewer: () => setViewerFile(null),
     }),
