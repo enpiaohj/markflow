@@ -425,12 +425,28 @@ fn extract_and_index(conn: &Connection, root: &Path, file_id: i64, row: &ScanRow
 }
 
 /// 按磁盘当前内容重建单个文件的提取记录与 FTS 行。
+/// 文本格式按 UTF-8 lossy 读取；Office 格式走 OOXML 安全解析（office.rs）。
 pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i64, name: &str) {
     let _ = clear_extraction(conn, file_id);
-    let (status, text) = match std::fs::read(file_path) {
-        Ok(bytes) if bytes.len() as u64 > MAX_EXTRACT_BYTES => ("too_large".to_string(), None),
-        Ok(bytes) => ("ok".to_string(), Some(String::from_utf8_lossy(&bytes).to_string())),
-        Err(_) => ("read_error".to_string(), None),
+    let format = detect_format(name);
+    let (status, text) = if matches!(format, "word" | "excel" | "powerpoint") {
+        match std::fs::metadata(file_path) {
+            Ok(m) if m.len() <= crate::office::MAX_OFFICE_BYTES => {
+                match crate::office::extract_text(file_path, format) {
+                    Ok(t) if !t.trim().is_empty() => ("ok".to_string(), Some(t)),
+                    Ok(_) => ("parse_error".to_string(), None),
+                    Err(_) => ("parse_error".to_string(), None),
+                }
+            }
+            Ok(_) => ("too_large".to_string(), None),
+            Err(_) => ("read_error".to_string(), None),
+        }
+    } else {
+        match std::fs::read(file_path) {
+            Ok(bytes) if bytes.len() as u64 > MAX_EXTRACT_BYTES => ("too_large".to_string(), None),
+            Ok(bytes) => ("ok".to_string(), Some(String::from_utf8_lossy(&bytes).to_string())),
+            Err(_) => ("read_error".to_string(), None),
+        }
     };
     let _ = conn.execute(
         "INSERT INTO extracted_content (file_id, extractor_version, status, text) VALUES (?1, 'v1', ?2, ?3)",

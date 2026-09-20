@@ -40,6 +40,8 @@ interface LibraryContextValue {
   focusFile: { relativePath: string; nonce: number } | null;
   /** 当前在编辑器中打开的文件；null 表示编辑器关闭 */
   openFile: { relativePath: string; nonce: number } | null;
+  /** 当前在只读查看器中打开的文件（PDF / Office 快速预览） */
+  viewerFile: { relativePath: string; kind: "pdf" | "office"; nonce: number } | null;
   openWizard: () => void;
   closeWizard: () => void;
   requestSearchView: () => void;
@@ -58,6 +60,10 @@ interface LibraryContextValue {
   openInEditor: (relativePath: string) => void;
   /** 关闭编辑器，返回文档库视图 */
   closeFile: () => void;
+  /** 在只读查看器中打开文件 */
+  openInViewer: (relativePath: string, kind: "pdf" | "office") => void;
+  /** 关闭查看器 */
+  closeViewer: () => void;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
@@ -74,6 +80,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
   const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
+  const [viewerFile, setViewerFile] = useState<{ relativePath: string; kind: "pdf" | "office"; nonce: number } | null>(null);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -200,6 +207,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       contentVersion,
       focusFile,
       openFile,
+      viewerFile,
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
       requestSearchView,
@@ -219,8 +227,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setOpenFile({ relativePath, nonce: Date.now() });
       },
       closeFile: () => setOpenFile(null),
+      openInViewer: (relativePath: string, kind: "pdf" | "office") => {
+        setOpenFile(null);
+        setViewerFile({ relativePath, kind, nonce: Date.now() });
+      },
+      closeViewer: () => setViewerFile(null),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

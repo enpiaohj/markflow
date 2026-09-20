@@ -100,3 +100,21 @@ export interface VersionInfo {
   size: number;
   createdAt: number;
 }
+
+/** Office 快速预览（对应 Rust office.rs，按 kind 判别） */
+export type OfficePreview =
+  | { kind: "docx"; paragraphs: string[] }
+  | { kind: "xlsx"; sheets: SheetPreview[] }
+  | { kind: "pptx"; slides: SlidePreview[] };
+
+export interface SheetPreview {
+  name: string;
+  rows: string[][];
+  totalRows: number;
+}
+
+export interface SlidePreview {
+  number: number;
+  title: string;
+  texts: string[];
+}

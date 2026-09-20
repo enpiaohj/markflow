@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateLibraryRequest,
   FileEntry,
+  OfficePreview,
   LibraryMeta,
   QuickScanResult,
   SaveOutcome,
@@ -103,4 +104,21 @@ export function restoreFileVersion(
   versionId: number,
 ): Promise<SaveOutcome> {
   return invoke("restore_file_version", { libraryId, relativePath, versionId });
+}
+
+// ---------------------------------------------------------------------------
+// 预览与系统打开（v0.3）
+// ---------------------------------------------------------------------------
+
+export function getOfficePreview(libraryId: string, relativePath: string): Promise<OfficePreview> {
+  return invoke("get_office_preview", { libraryId, relativePath });
+}
+
+/** 二进制 IPC：返回 ArrayBuffer（供 PDF.js 使用） */
+export function readFileBytes(libraryId: string, relativePath: string): Promise<ArrayBuffer> {
+  return invoke("read_file_bytes", { libraryId, relativePath });
+}
+
+export function openPathInSystem(libraryId: string, relativePath: string): Promise<void> {
+  return invoke("open_path_in_system", { libraryId, relativePath });
 }

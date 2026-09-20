@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- PDF 阅读与 Office 快速预览（v0.3 首批）：
+  - PDF.js 阅读器：Canvas 渲染、翻页、缩放、跨页文本搜索（命中页码点击定位），
+    文件经二进制 IPC 读取且必须已登记在文档库索引中；
+  - Office OOXML 安全解析（office.rs，zip + roxmltree，不执行宏、不改源文件）：
+    DOCX 段落流 / XLSX 工作表网格（前 200 行 30 列、最多 8 表）/ PPTX 幻灯片大纲；
+    扫描时自动提取正文入库（extractor v1 扩展），Office 正文可被全文检索命中
+    （含 20MB 上限与 ZIP 炸弹条目限制）；
+  - 「使用系统应用打开」：已登记文件调用系统默认应用（Word/Excel/WPS），
+    外部保存后由文件监听自动重扫闭环。
+  - 测试文档库新增真实 DOCX / XLSX / PPTX / 中文 PDF 样例（含检索关键词）。
+  - Rust 测试新增至 17 项（DOCX/XLSX/PPTX 提取与预览、超限与异常文件拒绝）。
+
 - 原生编辑闭环（v0.2 核心）：
   - Markdown 可视化编辑器（Tiptap v3 / ProseMirror 分页画布 + tiptap-markdown 往返，
     支持标题、列表、任务列表、表格、引用、代码块、图片）与源码模式（CodeMirror 6，
