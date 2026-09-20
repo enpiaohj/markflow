@@ -33,7 +33,9 @@ Ctrl+S 原子保存、外部冲突检测、历史快照与一键恢复）、
 **PDF 阅读**（PDF.js 渲染、翻页缩放、全文搜索）、
 **Office 快速预览**（DOCX/XLSX/PPTX 安全提取，正文可检索，系统应用打开）、
 **转换与导入**（Pandoc：DOCX→可编辑 Markdown 副本、DOCX/HTML 导入；
-可选 LibreOffice 高保真预览；组件健康状态）。
+可选 LibreOffice 高保真预览；组件健康状态）、
+**AI 工作台**（OpenAI 兼容 Provider、密钥入凭据库、上下文门禁与敏感扫描、
+流式引用问答、AI 润色差异审阅、文档质量检查）。
 详见 [CHANGELOG](CHANGELOG.md)。
 
 ## 系统要求

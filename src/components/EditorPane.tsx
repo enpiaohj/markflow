@@ -32,12 +32,17 @@ import {
   Quote,
   Redo2,
   Save,
+  Sparkles,
   Square,
   TriangleAlert,
   Undo2,
 } from "lucide-react";
+import { Bot, ShieldCheck } from "lucide-react";
+import AiPanel from "./AiPanel";
+import DiffDialog from "./DiffDialog";
 import { useLibrary } from "./LibraryContext";
 import * as api from "../lib/api";
+import type { CheckIssue } from "../lib/types";
 import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
 import type { FileEntry, VersionInfo } from "../lib/types";
 
@@ -47,7 +52,15 @@ type SaveState = "saved" | "dirty" | "saving" | "error";
 // 可视化编辑器（Tiptap / ProseMirror，Markdown 为持久化真源）
 // ---------------------------------------------------------------------------
 
-function VisualEditor({ initial, onChange }: { initial: string; onChange: (md: string) => void }) {
+function VisualEditor({
+  initial,
+  onChange,
+  onPolish,
+}: {
+  initial: string;
+  onChange: (md: string) => void;
+  onPolish: () => void;
+}) {
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -112,6 +125,16 @@ function VisualEditor({ initial, onChange }: { initial: string; onChange: (md: s
           onClick={() => editor.chain().focus().undo().run()}><Undo2 className="h-3.5 w-3.5" /></button>
         <button type="button" className={btn(false)} title="重做"
           onClick={() => editor.chain().focus().redo().run()}><Redo2 className="h-3.5 w-3.5" /></button>
+        <span className="mx-1 h-4 w-px bg-gray-200" />
+        <button
+          type="button"
+          className={`${btn(false)} w-auto gap-1 px-2`}
+          title="AI 润色整篇文档（进入差异审阅）"
+          onClick={onPolish}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          AI 润色
+        </button>
       </div>
 
       {/* 分页文档画布 */}
@@ -191,6 +214,17 @@ export default function EditorPane() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<VersionInfo[] | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [issues, setIssues] = useState<CheckIssue[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [diff, setDiff] = useState<{ original: string; polished: string; loading: boolean } | null>(null);
+  const [aiProviderId, setAiProviderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.aiListProviders().then((list) => {
+      setAiProviderId(list[0]?.id ?? null);
+    });
+  }, [openFile]);
 
   const rel = openFile?.relativePath ?? "";
 
@@ -311,6 +345,67 @@ export default function EditorPane() {
     }
   }
 
+  async function runCheck() {
+    if (!current || !openFile) return;
+    setChecking(true);
+    try {
+      setIssues(await api.checkDocument(current.id, rel));
+    } catch (err) {
+      alert(`检查失败：${err}`);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  /** AI 润色当前文档 → 差异审阅（§8.7） */
+  async function runPolish(allowSensitive: boolean) {
+    if (!current || !openFile) return;
+    const original = editText;
+    setDiff({ original, polished: "", loading: true });
+    let polished = "";
+    try {
+      await api.aiChat(
+        {
+          providerId: aiProviderId ?? "",
+          libraryId: current.id,
+          contextPaths: [rel],
+          allowSensitive,
+          messages: [
+            {
+              role: "user",
+              content:
+                "请润色以下 Markdown 文档：保持整体结构与语义不变，改进表达流畅度与用词准确性，" +
+                "修正明显的错别字。直接输出润色后的完整 Markdown 文档，不要输出任何解释。\n\n" +
+                original,
+            },
+          ],
+        },
+        (chunk) => {
+          polished += chunk;
+          setDiff({ original, polished, loading: true });
+        },
+      );
+      if (!polished.trim()) {
+        alert("AI 未返回内容，请检查 Provider 配置或稍后重试。");
+        setDiff(null);
+        return;
+      }
+      setDiff({ original, polished, loading: false });
+    } catch (err) {
+      const message = String(err);
+      setDiff(null);
+      if (message.startsWith("SENSITIVE::")) {
+        if (confirm("当前文档包含疑似敏感信息（详见「检查」面板）。\n确认将其发送给 AI Provider 进行润色吗？")) {
+          await runPolish(true);
+        }
+      } else if (message.includes("Provider 不存在")) {
+        alert("尚未配置 AI Provider，请在「设置 → AI」中添加。");
+      } else {
+        alert(message);
+      }
+    }
+  }
+
   const isMarkdown = entry?.format === "markdown";
   const dirty = editText !== savedText;
   // 展示状态：保存中/失败优先，其后由「文本是否变化」驱动
@@ -384,6 +479,43 @@ export default function EditorPane() {
               保存失败
             </span>
           )}
+
+          <button
+            type="button"
+            onClick={() => void runCheck()}
+            disabled={checking || loadState !== "ok"}
+            title="文档质量检查（标题层级 / 断链 / 空章节 / 敏感信息）"
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+          >
+            {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            检查
+            {issues && (
+              <span
+                className={`rounded px-1 text-[10px] ${
+                  issues.some((i) => i.severity === "error")
+                    ? "bg-red-50 text-red-600"
+                    : issues.length > 0
+                      ? "bg-amber-50 text-amber-600"
+                      : "bg-emerald-50 text-emerald-600"
+                }`}
+              >
+                {issues.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAiOpen((v) => !v)}
+            title="AI 助手（对话 / 润色，基于上下文门禁）"
+            className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
+              aiOpen
+                ? "border-primary-200 bg-primary-50 text-primary-700"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <Bot className="h-3.5 w-3.5" />
+            AI 助手
+          </button>
 
           {/* 历史快照下拉 */}
           <div className="relative">
@@ -491,7 +623,49 @@ export default function EditorPane() {
         </div>
       )}
 
-      {/* 编辑区 */}
+      {/* 检查结果面板 */}
+      {issues && (
+        <div className="max-h-44 shrink-0 overflow-y-auto border-b border-gray-200 bg-gray-50 px-4 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-xs font-medium text-gray-600">
+              质量检查：{issues.length === 0 ? "未发现问题" : `${issues.length} 项`}
+            </p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => void runCheck()} className="text-[11px] text-primary-600 hover:underline">
+                重新检查
+              </button>
+              <button type="button" onClick={() => setIssues(null)} className="text-[11px] text-gray-400 hover:text-gray-600">
+                关闭
+              </button>
+            </div>
+          </div>
+          <ul className="space-y-1">
+            {issues.map((issue, i) => (
+              <li key={i} className="flex items-center gap-2 text-[11px]">
+                <span
+                  className={`shrink-0 rounded px-1 py-0.5 ${
+                    issue.severity === "error"
+                      ? "bg-red-50 text-red-600"
+                      : issue.severity === "warning"
+                        ? "bg-amber-50 text-amber-600"
+                        : "bg-blue-50 text-blue-600"
+                  }`}
+                >
+                  {issue.severity === "error" ? "错误" : issue.severity === "warning" ? "警告" : "建议"}
+                </span>
+                <span className="shrink-0 text-gray-400">
+                  {issue.line > 0 ? `第 ${issue.line} 行` : "全文"}
+                </span>
+                <span className="truncate text-gray-600">{issue.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 编辑区 + AI 面板 */}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
       {loadState === "loading" && (
         <div className="flex flex-1 flex-col items-center justify-center text-gray-400">
           <Loader2 className="h-6 w-6 animate-spin" />
@@ -507,11 +681,38 @@ export default function EditorPane() {
       {loadState === "ok" && (
         <div className="min-h-0 flex-1">
           {mode === "visual" ? (
-            <VisualEditor key={`v-${modeEpoch}`} initial={savedText} onChange={setEditText} />
+            <VisualEditor
+              key={`v-${modeEpoch}`}
+              initial={savedText}
+              onChange={setEditText}
+              onPolish={() => void runPolish(false)}
+            />
           ) : (
             <SourceEditor key={`s-${modeEpoch}`} initial={editText} format={entry?.format ?? "text"} onChange={setEditText} />
           )}
         </div>
+      )}
+        </div>
+        {aiOpen && (
+          <aside className="w-96 shrink-0 border-l border-gray-200">
+            <AiPanel currentPath={rel} />
+          </aside>
+        )}
+      </div>
+
+      {/* AI 差异审阅（§8.7） */}
+      {diff && (
+        <DiffDialog
+          title="AI 润色 · 差异审阅"
+          original={diff.original}
+          modified={diff.polished}
+          loading={diff.loading}
+          onApply={(polished) => {
+            setEditText(polished);
+            setDiff(null);
+          }}
+          onCancel={() => setDiff(null)}
+        />
       )}
     </div>
   );
