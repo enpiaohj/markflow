@@ -141,3 +141,69 @@ export interface ConvertResult {
   mediaRelativeDir: string;
   mediaCount: number;
 }
+
+// ---------------------------------------------------------------------------
+// AI 工作台（v0.4）
+// ---------------------------------------------------------------------------
+
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+}
+
+export interface ProviderSaveRequest {
+  name: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  category: "ok" | "network" | "auth" | "not_found" | "server";
+  message: string;
+}
+
+export interface SensitiveHit {
+  kind: string;
+  label: string;
+  line: number;
+  masked: string;
+}
+
+export interface ContextFile {
+  relativePath: string;
+  chars: number;
+  truncated: boolean;
+  skipped: string | null;
+}
+
+export interface ContextPreview {
+  files: ContextFile[];
+  totalChars: number;
+  estimatedTokens: number;
+  sensitiveHits: SensitiveHit[];
+}
+
+export interface AiChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AiChatRequest {
+  providerId: string;
+  libraryId: string;
+  contextPaths: string[];
+  messages: AiChatMessage[];
+  allowSensitive: boolean;
+}
+
+/** 质量检查问题（§8.9：error 可阻止交付） */
+export interface CheckIssue {
+  severity: "error" | "warning" | "info";
+  line: number;
+  code: string;
+  message: string;
+}

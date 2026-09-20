@@ -185,6 +185,54 @@ pub fn list_recent_versions(conn: &Connection, library_id: &str, limit: i64) -> 
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }
 
+/// 在库内新建文本文件（AI 结果保存、新建文档等）。
+/// 不覆盖已有文件；写入后登记 files 行并建立提取/FTS（无需等待重扫即可编辑与检索）。
+pub fn create_text_file(
+    conn: &Connection,
+    library_id: &str,
+    parent_dir: &str,
+    file_name: &str,
+    content: &str,
+) -> Result<SaveOutcome, String> {
+    if file_name.contains("..") || file_name.contains('\\') || file_name.contains('/') {
+        return Err("文件名不能包含路径分隔符".into());
+    }
+    let format = crate::format::detect_format(file_name);
+    if !TEXT_FORMATS.contains(&format) {
+        return Err(format!("「{}」不支持直接创建，仅支持文本类格式", crate::format::format_label(&format)));
+    }
+    let root = get_library(conn, library_id)?.root_path;
+    let relative_path = if parent_dir.is_empty() {
+        file_name.to_string()
+    } else {
+        format!("{parent_dir}/{file_name}")
+    };
+    let path = Path::new(&root).join(&relative_path);
+    if path.exists() {
+        return Err(format!("文件已存在: {relative_path}"));
+    }
+    atomic_write(&path, content.as_bytes())?;
+
+    let meta = std::fs::metadata(&path).map_err(|e| format!("读取文件状态失败: {e}"))?;
+    let mtime = file_mtime(&path);
+    let parent = if parent_dir.is_empty() { String::new() } else { parent_dir.to_string() };
+    conn.execute(
+        "INSERT OR REPLACE INTO files
+         (library_id, relative_path, name, parent_path, is_dir, format, size, mtime)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)",
+        params![library_id, relative_path, file_name, parent, format, meta.len() as i64, mtime],
+    )
+    .map_err(|e| format!("登记索引失败: {e}"))?;
+    let file_id = conn.last_insert_rowid();
+    index_file_content(conn, &path, file_id, file_name);
+    conn.execute(
+        "UPDATE libraries SET file_count = file_count + 1 WHERE id = ?1",
+        params![library_id],
+    )
+    .ok();
+    Ok(SaveOutcome { mtime, size: meta.len() as i64 })
+}
+
 // ---------------------------------------------------------------------------
 // 内部实现
 // ---------------------------------------------------------------------------

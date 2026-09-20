@@ -149,7 +149,11 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             created_at    INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_versions_lib_path_time
-            ON file_versions(library_id, relative_path, created_at DESC);",
+            ON file_versions(library_id, relative_path, created_at DESC);
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
     )
 }
 
@@ -643,6 +647,20 @@ pub fn list_children(conn: &Connection, library_id: &str, relative_path: &str) -
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![library_id, relative_path], row_to_file_entry)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
+/// 列出库内全部文件（不含目录），供 AI 上下文选择等使用。
+pub fn list_all_files(conn: &Connection, library_id: &str, limit: i64) -> Result<Vec<FileEntryDto>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM files WHERE library_id = ?1 AND is_dir = 0
+             ORDER BY relative_path COLLATE NOCASE LIMIT ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![library_id, limit], row_to_file_entry)
         .map_err(|e| e.to_string())?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }

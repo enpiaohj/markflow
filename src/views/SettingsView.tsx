@@ -7,13 +7,15 @@ import {
   Download,
   Monitor,
   Palette,
+  Plus,
   ShieldCheck,
   Stamp,
+  Trash2,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
 import * as api from "../lib/api";
-import type { ComponentStatus } from "../lib/types";
+import type { AiTestResult, ComponentStatus, ProviderConfig } from "../lib/types";
 
 interface SettingSection {
   name: string;
@@ -21,23 +23,66 @@ interface SettingSection {
   icon: LucideIcon;
 }
 
-/** 设置分区对应设计文档第 15 节（组件分区为实时状态，其余骨架占位） */
+/** 设置分区对应设计文档第 15 节（组件与 AI 为实时状态，其余骨架占位） */
 const sections: SettingSection[] = [
   { name: "常规", description: "启动、最近库、语言、更新", icon: Monitor },
   { name: "外观", description: "浅色 / 深色、密度、字号、页面背景", icon: Palette },
   { name: "文档库", description: "排除规则、索引、缓存、便携元数据", icon: Database },
   { name: "编辑器", description: "自动保存、换行符、Markdown 方言、快捷键", icon: Braces },
-  { name: "AI", description: "Provider、模型能力、主备策略、隐私与敏感信息", icon: Bot },
   { name: "审阅", description: "状态、检查规则、交付门禁", icon: Stamp },
 ];
 
-/** 「设置」页：组件管理为实时状态，其余分区占位 */
+/** 「设置」页：组件与 AI Provider 为实时状态，其余分区占位 */
 export default function SettingsView() {
   const [components, setComponents] = useState<ComponentStatus[] | null>(null);
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: "", baseUrl: "", model: "", apiKey: "" });
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, AiTestResult>>({});
+
+  function loadProviders() {
+    void api
+      .aiListProviders()
+      .then(setProviders)
+      .catch(() => setProviders([]));
+  }
 
   useEffect(() => {
     void api.listComponents().then(setComponents).catch(() => setComponents([]));
+    loadProviders();
   }, []);
+
+  async function saveProvider() {
+    if (!form.name.trim() || !form.baseUrl.trim() || !form.model.trim() || !form.apiKey.trim()) {
+      alert("请完整填写名称、接口地址、模型与 API Key。");
+      return;
+    }
+    try {
+      await api.aiSaveProvider(form);
+      setForm({ name: "", baseUrl: "", model: "", apiKey: "" });
+      setAdding(false);
+      loadProviders();
+    } catch (err) {
+      alert(`保存失败：${err}`);
+    }
+  }
+
+  async function testProvider(id: string) {
+    setTesting(id);
+    try {
+      const result = await api.aiTestProvider(id);
+      setTestResult((prev) => ({ ...prev, [id]: result }));
+    } finally {
+      setTesting(null);
+    }
+  }
+
+  async function deleteProvider(id: string) {
+    if (!confirm("删除该 Provider？其 API Key 将同步从系统凭据库移除。")) return;
+    await api.aiDeleteProvider(id);
+    loadProviders();
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-8">
@@ -85,6 +130,125 @@ export default function SettingsView() {
           </li>
         )}
       </ul>
+
+      <p className="mb-2 mt-6 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-gray-400">
+        <span>AI Provider（OpenAI 兼容）</span>
+        {!adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 text-[11px] font-normal normal-case text-primary-600 hover:underline"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            添加 Provider
+          </button>
+        )}
+      </p>
+
+      {adding && (
+        <div className="mb-3 space-y-2 rounded-xl border border-gray-200 bg-white p-4">
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="名称，如 DeepSeek"
+              className="h-9 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
+            />
+            <input
+              type="text"
+              value={form.model}
+              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              placeholder="模型名，如 deepseek-chat"
+              className="h-9 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
+            />
+          </div>
+          <input
+            type="text"
+            value={form.baseUrl}
+            onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+            placeholder="接口地址（OpenAI 兼容，通常以 /v1 结尾）"
+            className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
+          />
+          <input
+            type="password"
+            value={form.apiKey}
+            onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            placeholder="API Key（保存到 Windows 凭据库，不写入文档库）"
+            className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
+          />
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="h-8 rounded-lg border border-gray-200 px-3 text-[13px] text-gray-600 hover:bg-gray-50"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveProvider()}
+              className="h-8 rounded-lg bg-primary-600 px-3 text-[13px] font-medium text-white hover:bg-primary-700"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ul className="mb-2 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
+        {providers.length === 0 && (
+          <li className="px-4 py-3 text-xs text-gray-400">
+            尚未添加 Provider。添加后即可在编辑器「AI 助手」中使用对话与润色。
+          </li>
+        )}
+        {providers.map((p) => {
+          const result = testResult[p.id];
+          return (
+            <li key={p.id} className="px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
+                  <Bot className="h-4.5 w-4.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-gray-900">{p.name}</span>
+                  <span className="block truncate text-xs text-gray-500">
+                    {p.model} · {p.baseUrl}
+                  </span>
+                  {result && (
+                    <span className={`mt-1 inline-flex items-center gap-1 text-[11px] ${result.ok ? "text-emerald-600" : "text-red-500"}`}>
+                      {result.ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {result.message}
+                    </span>
+                  )}
+                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={testing === p.id}
+                    onClick={() => void testProvider(p.id)}
+                    className="rounded-md border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    {testing === p.id ? "测试中…" : "测试连接"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteProvider(p.id)}
+                    title="删除（密钥同步移除）"
+                    className="rounded-md p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mb-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-gray-400">
+        <Download className="mt-0.5 h-3 w-3 shrink-0" />
+        API Key 仅保存在 Windows 凭据库；AI 发送前会扫描上下文敏感信息，命中需你确认放行。
+      </p>
 
       <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">
         应用设置

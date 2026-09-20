@@ -1,10 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiChatRequest,
+  AiTestResult,
+  CheckIssue,
   ComponentStatus,
+  ContextPreview,
   ConversionPrecheck,
   ConvertResult,
   CreateLibraryRequest,
   FileEntry,
+  ProviderConfig,
+  ProviderSaveRequest,
   OfficePreview,
   LibraryMeta,
   QuickScanResult,
@@ -150,4 +156,56 @@ export function convertOfficeToPdf(libraryId: string, relativePath: string): Pro
 /** 导入外部文件：DOCX/HTML 转 Markdown，其余原样复制；返回入库后的相对路径 */
 export function importFile(libraryId: string, targetDir: string, sourcePath: string): Promise<string> {
   return invoke("import_file", { libraryId, targetDir, sourcePath });
+}
+
+// ---------------------------------------------------------------------------
+// AI 工作台（v0.4）
+// ---------------------------------------------------------------------------
+
+export function aiListProviders(): Promise<ProviderConfig[]> {
+  return invoke("ai_list_providers");
+}
+
+export function aiSaveProvider(request: ProviderSaveRequest): Promise<ProviderConfig> {
+  return invoke("ai_save_provider", { request });
+}
+
+export function aiDeleteProvider(id: string): Promise<void> {
+  return invoke("ai_delete_provider", { id });
+}
+
+export function aiTestProvider(id: string): Promise<AiTestResult> {
+  return invoke("ai_test_provider", { id });
+}
+
+export function aiPrepareContext(libraryId: string, contextPaths: string[]): Promise<ContextPreview> {
+  return invoke("ai_prepare_context", { libraryId, contextPaths });
+}
+
+/** 流式对话：通过 Tauri Channel 逐段回调 */
+export async function aiChat(
+  request: AiChatRequest,
+  onChunk: (text: string) => void,
+): Promise<{ model: string; sensitiveHitCount: number }> {
+  const { Channel } = await import("@tauri-apps/api/core");
+  const channel = new Channel<string>();
+  channel.onmessage = onChunk;
+  return invoke("ai_chat", { channel, request });
+}
+
+export function checkDocument(libraryId: string, relativePath: string): Promise<CheckIssue[]> {
+  return invoke("check_document", { libraryId, relativePath });
+}
+
+export function createTextFile(
+  libraryId: string,
+  parentDir: string,
+  fileName: string,
+  content: string,
+): Promise<{ mtime: number; size: number }> {
+  return invoke("create_text_file", { libraryId, parentDir, fileName, content });
+}
+
+export function listLibraryFiles(libraryId: string, limit = 500): Promise<FileEntry[]> {
+  return invoke("list_library_files", { libraryId, limit });
 }

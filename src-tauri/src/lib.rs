@@ -1,9 +1,12 @@
+mod ai;
+mod checks;
 mod component_manager;
 mod convert;
 mod editor;
 mod format;
 mod library;
 mod office;
+mod sensitive;
 mod tasks;
 mod watch;
 
@@ -190,6 +193,16 @@ fn open_path_in_system(
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
 }
 
+/// 列出库内全部文件（AI 上下文选择用）。
+#[tauri::command]
+fn list_library_files(
+    state: State<'_, AppState>,
+    library_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<library::FileEntryDto>, String> {
+    library::list_all_files(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(500))
+}
+
 /// 可选组件（Pandoc / LibreOffice）健康状态。
 #[tauri::command]
 fn list_components() -> Vec<component_manager::ComponentStatus> {
@@ -369,6 +382,113 @@ fn import_file(
     Ok(if target_dir.is_empty() { imported_name } else { format!("{target_dir}/{imported_name}") })
 }
 
+/// AI Provider 列表（不含密钥）。
+#[tauri::command]
+fn ai_list_providers(state: State<'_, AppState>) -> Vec<ai::ProviderConfig> {
+    ai::list_providers(&state.0.lock().unwrap())
+}
+
+/// 保存 Provider：API Key 写入系统凭据库（不落库、不回传前端）。
+#[tauri::command]
+fn ai_save_provider(
+    state: State<'_, AppState>,
+    request: ai::ProviderSaveRequest,
+) -> Result<ai::ProviderConfig, String> {
+    ai::save_provider(&state.0.lock().unwrap(), request)
+}
+
+#[tauri::command]
+fn ai_delete_provider(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    ai::delete_provider(&state.0.lock().unwrap(), &id)
+}
+
+/// 连通性测试：区分网络 / 认证 / 地址 / 服务端问题。
+#[tauri::command]
+async fn ai_test_provider(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ai::TestResult, String> {
+    let (base_url, key) = {
+        let conn = state.0.lock().unwrap();
+        let provider = ai::read_providers(&conn)
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or("Provider 不存在")?;
+        let key = ai::provider_key(&provider.id)?;
+        (provider.base_url, key)
+    };
+    Ok(ai::test_provider(&base_url, &key).await)
+}
+
+/// 上下文门禁第一步：组装预览（范围 / 字符 / Token 估算 / 敏感扫描），不发送。
+#[tauri::command]
+fn ai_prepare_context(
+    state: State<'_, AppState>,
+    library_id: String,
+    context_paths: Vec<String>,
+) -> Result<ai::ContextPreview, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    ai::prepare_context_with(&root, &context_paths)
+}
+
+/// 流式对话：上下文门禁（敏感命中需 allow_sensitive 放行）→ SSE 流 → Channel 推送。
+#[tauri::command]
+async fn ai_chat(
+    state: State<'_, AppState>,
+    channel: tauri::ipc::Channel<String>,
+    request: ai::AiChatRequest,
+) -> Result<ai::ChatOutcome, String> {
+    let (root, provider, key) = {
+        let conn = state.0.lock().unwrap();
+        let provider = ai::read_providers(&conn)
+            .into_iter()
+            .find(|p| p.id == request.provider_id)
+            .ok_or("Provider 不存在")?;
+        let key = ai::provider_key(&provider.id)?;
+        let root = library::get_library(&conn, &request.library_id)?.root_path;
+        (root, provider, key)
+    };
+    ai::chat(&root, provider, key, channel, request).await
+}
+
+/// 文档质量检查（Markdown：标题层级 / 断链 / 空章节 / 敏感信息）。
+#[tauri::command]
+fn check_document(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<Vec<checks::Issue>, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let path = std::path::Path::new(&root).join(&relative_path);
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let document_dir = path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from(&root));
+    let resolver = checks::link_resolver(std::path::Path::new(&root), &document_dir);
+    Ok(checks::check_markdown(&content, &resolver))
+}
+
+/// 在库内新建文本文件（AI 结果保存为新文档等）。
+#[tauri::command]
+fn create_text_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    library_id: String,
+    parent_dir: String,
+    file_name: String,
+    content: String,
+) -> Result<editor::SaveOutcome, String> {
+    let outcome = editor::create_text_file(&state.0.lock().unwrap(), &library_id, &parent_dir, &file_name, &content);
+    if outcome.is_ok() {
+        let _ = app.emit(
+            "file:saved",
+            serde_json::json!({ "libraryId": library_id, "relativePath": format!("{parent_dir}/{file_name}") }),
+        );
+    }
+    outcome
+}
+
 fn library_file_path(
     state: &State<'_, AppState>,
     library_id: &str,
@@ -492,6 +612,15 @@ pub fn run() {
             open_path_in_system,
             list_components,
             docx_precheck,
+            ai_list_providers,
+            ai_save_provider,
+            ai_delete_provider,
+            ai_test_provider,
+            ai_prepare_context,
+            ai_chat,
+            check_document,
+            create_text_file,
+            list_library_files,
             convert_docx_to_markdown,
             convert_office_to_pdf,
             import_file,

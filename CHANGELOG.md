@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- AI 工作台（v0.4，§8.6/§8.7/§8.9/§12）：
+  - OpenAI 兼容 Provider 管理：API Key 存 Windows 凭据库（keyring），不落库、
+    不回传前端；连通性测试区分网络 / 认证 / 地址 / 服务端问题；
+  - 上下文门禁：发送前组装预览（文件范围、截断提示、字符数与 Token 估算、
+    敏感信息扫描），命中需用户知情放行后才发送；
+  - 流式对话（Tauri Channel 逐段推送），回答以「【来源 n】」标注引用，
+    一键保存为新文档；
+  - AI 润色 → 行级差异审阅对话框（应用 / 放弃），应用后由保存闭环自动快照；
+  - 文档质量检查（Markdown）：标题层级跳跃、断链、空章节、敏感信息，
+    分错误 / 警告 / 建议，编辑器内一键运行与面板展示。
+  - 设置页新增 AI Provider 管理区；编辑器新增「AI 助手」侧栏与「检查」面板。
+
 - 转换与导入（v0.3 第二批，§5.3 / §8.13 / §10.3）：
   - 组件管理器：探测 Pandoc / LibreOffice 的路径与版本（设置页实时展示健康状态）；
   - DOCX → Markdown 可编辑副本（Pandoc 3.11 sidecar，参数数组调用 + 60s 超时）：
