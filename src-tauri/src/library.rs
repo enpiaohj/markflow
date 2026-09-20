@@ -167,7 +167,18 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             created_at    INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_export_jobs_lib
-            ON export_jobs(library_id, created_at DESC);",
+            ON export_jobs(library_id, created_at DESC);
+        CREATE TABLE IF NOT EXISTS annotations (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_id    TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            quote         TEXT NOT NULL,
+            body          TEXT NOT NULL,
+            resolved      INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_annotations_lib_path
+            ON annotations(library_id, relative_path, created_at DESC);",
     )
 }
 
@@ -478,7 +489,7 @@ pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i
     }
 }
 
-fn clear_extraction(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
+pub(crate) fn clear_extraction(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM extracted_content WHERE file_id = ?1", params![file_id])?;
     conn.execute("DELETE FROM search_fts WHERE file_id = ?1", params![file_id])?;
     Ok(())

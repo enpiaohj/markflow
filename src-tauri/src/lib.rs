@@ -1,4 +1,5 @@
 mod ai;
+mod annotations;
 mod checks;
 mod component_manager;
 mod convert;
@@ -6,6 +7,7 @@ mod delivery;
 mod editor;
 mod format;
 mod library;
+mod ocr;
 mod office;
 mod sensitive;
 mod tasks;
@@ -616,6 +618,88 @@ fn open_directory(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("打开目录失败: {e}"))
 }
 
+
+/// Windows OCR 是否可用。
+#[tauri::command]
+fn ocr_available() -> bool {
+    ocr::available()
+}
+
+/// 识别库内图片：结果写入提取缓存与 FTS（搜索可命中图片文字），返回文本与置信度。
+#[tauri::command]
+async fn ocr_file(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<ocr::OcrResult, String> {
+    let (root, file_id, name): (String, i64, String) = {
+        let conn = state.0.lock().unwrap();
+        let root = library::get_library(&conn, &library_id)?.root_path;
+        let (file_id, name): (i64, String) = conn
+            .query_row(
+                "SELECT id, name FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0",
+                rusqlite::params![library_id, relative_path],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "图片不存在于文档库索引")?;
+        (root, file_id, name)
+    };
+    let bytes = std::fs::read(std::path::Path::new(&root).join(&relative_path))
+        .map_err(|e| format!("读取图片失败: {e}"))?;
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("图片超过 OCR 大小上限（10 MB）".into());
+    }
+        let result = tauri::async_runtime::spawn_blocking(move || ocr::recognize_bytes(&bytes))
+        .await
+        .map_err(|e| format!("OCR 线程失败: {e}"))??;
+    {
+        let conn = state.0.lock().unwrap();
+        library::clear_extraction(&conn, file_id).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO extracted_content (file_id, extractor_version, status, text) VALUES (?1, 'ocr-win', 'ok', ?2)",
+            rusqlite::params![file_id, result.text],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO search_fts (file_id, name, body) VALUES (?1, ?2, ?3)",
+            rusqlite::params![file_id, name, result.text],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(result)
+}
+
+/// 添加批注（引用选中文本）。
+#[tauri::command]
+fn add_annotation(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+    quote: String,
+    body: String,
+) -> Result<annotations::Annotation, String> {
+    annotations::add(&state.0.lock().unwrap(), &library_id, &relative_path, &quote, &body)
+}
+
+#[tauri::command]
+fn list_annotations(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<Vec<annotations::Annotation>, String> {
+    annotations::list_for_file(&state.0.lock().unwrap(), &library_id, &relative_path)
+}
+
+#[tauri::command]
+fn set_annotation_resolved(state: State<'_, AppState>, id: i64, resolved: bool) -> Result<(), String> {
+    annotations::set_resolved(&state.0.lock().unwrap(), id, resolved)
+}
+
+#[tauri::command]
+fn delete_annotation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    annotations::delete(&state.0.lock().unwrap(), id)
+}
+
 /// 读取可编辑文本文件（返回内容与冲突检测基线）。
 #[tauri::command]
 fn read_text_file(
@@ -739,6 +823,12 @@ pub fn run() {
             check_document,
             create_text_file,
             list_library_files,
+            ocr_available,
+            ocr_file,
+            add_annotation,
+            list_annotations,
+            set_annotation_resolved,
+            delete_annotation,
             delivery_precheck,
             delivery_start,
             list_delivery_history,

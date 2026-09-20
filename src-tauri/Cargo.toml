@@ -34,6 +34,8 @@ keyring = { version = "3", features = ["windows-native"] }
 regex = "1"
 futures-util = "0.3"
 sha2 = "0.10"
+windows = { version = "0.61", default-features = false, features = ["Media_Ocr", "Storage_Streams", "Graphics_Imaging", "Globalization", "Foundation"] }
+windows-core = "0.61"
 
 [dev-dependencies]
 tempfile = "3"

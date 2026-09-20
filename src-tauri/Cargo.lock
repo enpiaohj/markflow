@@ -2242,6 +2242,8 @@ dependencies = [
  "tempfile",
  "uuid",
  "walkdir",
+ "windows",
+ "windows-core 0.61.2",
  "zip",
 ]
 

@@ -26,6 +26,7 @@ import {
   History,
   Italic,
   List,
+  MessageSquarePlus,
   ListOrdered,
   ListTodo,
   Loader2,
@@ -39,6 +40,7 @@ import {
 } from "lucide-react";
 import { Bot, ShieldCheck } from "lucide-react";
 import AiPanel from "./AiPanel";
+import AnnotationsPanel from "./AnnotationsPanel";
 import DiffDialog from "./DiffDialog";
 import { useLibrary } from "./LibraryContext";
 import * as api from "../lib/api";
@@ -56,10 +58,12 @@ function VisualEditor({
   initial,
   onChange,
   onPolish,
+  registerSelection,
 }: {
   initial: string;
   onChange: (md: string) => void;
   onPolish: () => void;
+  registerSelection: (fn: () => string) => void;
 }) {
   const editor = useEditor({
     extensions: [
@@ -81,6 +85,14 @@ function VisualEditor({
       onChange(storage.markdown?.getMarkdown() ?? "");
     },
   });
+
+  useEffect(() => {
+    if (!editor) return;
+    registerSelection(() => {
+      const sel = editor.state.selection as unknown as { from: number; to: number; empty: boolean };
+      return sel.empty ? "" : editor.state.doc.textBetween(sel.from, sel.to, " ");
+    });
+  }, [editor, registerSelection]);
 
   if (!editor) return null;
 
@@ -168,10 +180,12 @@ function SourceEditor({
   initial,
   format,
   onChange,
+  registerSelection,
 }: {
   initial: string;
   format: string;
   onChange: (text: string) => void;
+  registerSelection: (fn: () => string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -187,6 +201,10 @@ function SourceEditor({
         ],
       }),
       parent: hostRef.current,
+    });
+    registerSelection(() => {
+      const sel = view.state.selection as unknown as { from: number; to: number };
+      return view.state.sliceDoc(sel.from, sel.to);
     });
     return () => view.destroy();
     // initial 仅在挂载时使用；编辑中的变化通过 onChange 上抛，切换编辑器由 key 重建完成
@@ -214,7 +232,8 @@ export default function EditorPane() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<VersionInfo[] | null>(null);
-  const [aiOpen, setAiOpen] = useState(false);
+  const [sidePanel, setSidePanel] = useState<"ai" | "notes" | null>(null);
+  const selectionFnRef = useRef<(() => string) | null>(null);
   const [issues, setIssues] = useState<CheckIssue[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diff, setDiff] = useState<{ original: string; polished: string; loading: boolean } | null>(null);
@@ -505,16 +524,29 @@ export default function EditorPane() {
           </button>
           <button
             type="button"
-            onClick={() => setAiOpen((v) => !v)}
+            onClick={() => setSidePanel((v) => (v === "ai" ? null : "ai"))}
             title="AI 助手（对话 / 润色，基于上下文门禁）"
             className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
-              aiOpen
+              sidePanel === "ai"
                 ? "border-primary-200 bg-primary-50 text-primary-700"
                 : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
             }`}
           >
             <Bot className="h-3.5 w-3.5" />
             AI 助手
+          </button>
+          <button
+            type="button"
+            onClick={() => setSidePanel((v) => (v === "notes" ? null : "notes"))}
+            title="批注（基于编辑器选中文本）"
+            className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
+              sidePanel === "notes"
+                ? "border-primary-200 bg-primary-50 text-primary-700"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            批注
           </button>
 
           {/* 历史快照下拉 */}
@@ -686,16 +718,23 @@ export default function EditorPane() {
               initial={savedText}
               onChange={setEditText}
               onPolish={() => void runPolish(false)}
+              registerSelection={(fn) => (selectionFnRef.current = fn)}
             />
           ) : (
-            <SourceEditor key={`s-${modeEpoch}`} initial={editText} format={entry?.format ?? "text"} onChange={setEditText} />
+            <SourceEditor
+              key={`s-${modeEpoch}`}
+              initial={editText}
+              format={entry?.format ?? "text"}
+              onChange={setEditText}
+              registerSelection={(fn) => (selectionFnRef.current = fn)}
+            />
           )}
         </div>
       )}
         </div>
-        {aiOpen && (
+        {sidePanel && (
           <aside className="w-96 shrink-0 border-l border-gray-200">
-            <AiPanel currentPath={rel} />
+            {sidePanel === "ai" ? <AiPanel currentPath={rel} /> : <AnnotationsPanel currentPath={rel} getSelection={() => selectionFnRef.current?.() ?? ""} />}
           </aside>
         )}
       </div>
