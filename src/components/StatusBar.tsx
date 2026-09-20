@@ -53,7 +53,7 @@ export default function StatusBar() {
             {runningCount} 个任务运行中
           </button>
         )}
-        <span>v0.1.0</span>
+        <span>v0.2.0</span>
       </div>
     </footer>
   );

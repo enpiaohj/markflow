@@ -17,8 +17,11 @@ dist-ssr
 src-tauri/target/
 src-tauri/gen/schemas/
 
-# 本地发布快照（Release Artifact 不进 Git History，交付走 GitHub Releases）
-releases/
+# 本地发布快照：按全局规则仅 source/ 与 CHANGELOG.md 入库，二进制产物排除
+releases/**
+!releases/**/
+!releases/*/CHANGELOG.md
+!releases/*/source/**
 
 # Editor directories and files
 .vscode/*
