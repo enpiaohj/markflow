@@ -45,7 +45,7 @@ interface LibraryContextValue {
   /** 当前在只读查看器中打开的文件（PDF / Office 快速预览 / LibreOffice 高保真） */
   viewerFile: {
     relativePath: string;
-    kind: "pdf" | "office" | "hifi";
+    kind: "pdf" | "office" | "hifi" | "image";
     nonce: number;
     /** hifi 模式：LibreOffice 转出的 PDF 字节 */
     bytes?: ArrayBuffer;
@@ -69,7 +69,7 @@ interface LibraryContextValue {
   /** 关闭编辑器，返回文档库视图 */
   closeFile: () => void;
   /** 在只读查看器中打开文件 */
-  openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi", bytes?: ArrayBuffer) => void;
+  openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => void;
   /** 关闭查看器 */
   closeViewer: () => void;
   openDelivery: () => void;
@@ -93,7 +93,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<{
     relativePath: string;
-    kind: "pdf" | "office" | "hifi";
+    kind: "pdf" | "office" | "hifi" | "image";
     nonce: number;
     bytes?: ArrayBuffer;
   } | null>(null);
@@ -244,7 +244,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setOpenFile({ relativePath, nonce: Date.now() });
       },
       closeFile: () => setOpenFile(null),
-      openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi", bytes?: ArrayBuffer) => {
+      openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
         setOpenFile(null);
         setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
       },

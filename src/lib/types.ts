@@ -243,3 +243,18 @@ export interface DeliveryRecord {
   outputs: string[];
   createdAt: number;
 }
+
+export interface OcrResult {
+  text: string;
+}
+
+export interface Annotation {
+  id: number;
+  relativePath: string;
+  quote: string;
+  body: string;
+  resolved: boolean;
+  createdAt: number;
+  /** 引用文本当前是否仍存在于文件中；null 表示无法判断（如文件不可读） */
+  quotePresent: boolean | null;
+}

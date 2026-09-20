@@ -409,6 +409,8 @@ export default function LibraryView() {
                         openInViewer(entry.relativePath, "pdf");
                       } else if (entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint") {
                         openInViewer(entry.relativePath, "office");
+                      } else if (entry.format === "image") {
+                        openInViewer(entry.relativePath, "image");
                       } else if (EDITABLE_FORMATS.has(entry.format)) {
                         openInEditor(entry.relativePath);
                       }
@@ -420,6 +422,8 @@ export default function LibraryView() {
                           ? "双击阅读（PDF.js）"
                           : entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint"
                             ? "双击快速预览（提取文本 / 工作表 / 幻灯片）"
+                            : entry.format === "image"
+                              ? "双击查看图片（支持 OCR 文字识别）"
                             : EDITABLE_FORMATS.has(entry.format)
                               ? "双击编辑（Markdown 支持可视化 / 源码模式）"
                               : "使用系统应用打开（详见右侧详情）"

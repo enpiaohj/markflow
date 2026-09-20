@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Annotation,
   AiChatRequest,
   AiTestResult,
   CheckIssue,
@@ -235,4 +236,37 @@ export function listDeliveryHistory(libraryId: string, limit = 50): Promise<Deli
 
 export function openDirectory(path: string): Promise<void> {
   return invoke("open_directory", { path });
+}
+
+// ---------------------------------------------------------------------------
+// OCR 与批注（v0.4 收尾）
+// ---------------------------------------------------------------------------
+
+export function ocrAvailable(): Promise<boolean> {
+  return invoke("ocr_available");
+}
+
+export function ocrFile(libraryId: string, relativePath: string): Promise<{ text: string }> {
+  return invoke("ocr_file", { libraryId, relativePath });
+}
+
+export function addAnnotation(
+  libraryId: string,
+  relativePath: string,
+  quote: string,
+  body: string,
+): Promise<Annotation> {
+  return invoke("add_annotation", { libraryId, relativePath, quote, body });
+}
+
+export function listAnnotations(libraryId: string, relativePath: string): Promise<Annotation[]> {
+  return invoke("list_annotations", { libraryId, relativePath });
+}
+
+export function setAnnotationResolved(id: string | number, resolved: boolean): Promise<void> {
+  return invoke("set_annotation_resolved", { id, resolved: resolved ? 1 : 0 });
+}
+
+export function deleteAnnotation(id: string | number): Promise<void> {
+  return invoke("delete_annotation", { id });
 }

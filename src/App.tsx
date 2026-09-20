@@ -5,6 +5,7 @@ import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import CreateLibraryWizard from "./components/CreateLibraryWizard";
 import EditorPane from "./components/EditorPane";
+import ImagePreviewPane from "./components/ImagePreviewPane";
 import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
@@ -68,6 +69,8 @@ function Shell() {
               <PdfViewer />
             ) : viewerFile.kind === "hifi" ? (
               <PdfViewer external={{ bytes: viewerFile.bytes ?? new ArrayBuffer(0), title: viewerFile.relativePath }} />
+            ) : viewerFile.kind === "image" ? (
+              <ImagePreviewPane />
             ) : (
               <OfficePreviewPane />
             )
