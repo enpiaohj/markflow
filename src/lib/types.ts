@@ -47,7 +47,7 @@ export interface CreateLibraryRequest {
   portableMeta: boolean;
 }
 
-/** scan:progress / scan:completed / scan:failed 事件载荷 */
+/** scan:completed / scan:failed / library:changed 事件载荷 */
 export interface ScanProgressEvent {
   libraryId: string;
   fileCount: number;
@@ -58,3 +58,11 @@ export interface ScanFailedEvent {
   libraryId: string;
   error: string;
 }
+
+/** 搜索命中：FileEntry 展开字段 + 命中信息 */
+export type SearchHit = FileEntry & {
+  /** 命中片段，命中位置以【】标注；文件名命中时为空 */
+  snippet: string;
+  /** name = 文件名命中；body = 正文命中 */
+  matchedIn: "name" | "body";
+};

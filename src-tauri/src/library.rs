@@ -29,6 +29,12 @@ pub const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
     ".vscode",
 ];
 
+/// 参与文本提取与全文索引的格式（Office/PDF 提取引擎在后续迭代接入）。
+pub const TEXT_FORMATS: &[&str] = &["markdown", "text", "code", "json", "yaml", "xml", "config", "csv"];
+
+/// 文本提取大小上限：超过则记录 too_large，不做正文索引。
+pub const MAX_EXTRACT_BYTES: u64 = 2 * 1024 * 1024;
+
 /// 单库扫描文件数上限（防御性保护：网络盘 / 误选根目录时避免失控）。
 pub const MAX_SCAN_ENTRIES: usize = 200_000;
 
@@ -124,7 +130,16 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             UNIQUE(library_id, relative_path)
         );
         CREATE INDEX IF NOT EXISTS idx_files_library_parent
-            ON files(library_id, parent_path);",
+            ON files(library_id, parent_path);
+        CREATE TABLE IF NOT EXISTS extracted_content (
+            file_id           INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+            extractor_version TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            text              TEXT
+        );
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+            file_id UNINDEXED, name, body, tokenize='trigram'
+        );",
     )
 }
 
@@ -276,7 +291,21 @@ fn mtime_ms(metadata: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+/// 从库设置 JSON 提取用户自定义排除目录。
+pub fn excludes_from(settings: &serde_json::Value) -> Vec<String> {
+    settings
+        .get("excludeDirs")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 轻量扫描：只统计数量与总大小，供建库向导第一步展示。
+/// 被锁定/无权限的条目计入 skipped，不中断扫描。
 pub fn quick_scan(root: &Path, exclude: &[String]) -> Result<QuickScanResult, String> {
     if !root.is_dir() {
         return Err(format!("文件夹不存在或不可访问: {}", root.display()));
@@ -286,7 +315,10 @@ pub fn quick_scan(root: &Path, exclude: &[String]) -> Result<QuickScanResult, St
         .into_iter()
         .filter_entry(|e| !is_excluded(e, exclude))
     {
-        let entry = entry.map_err(|e| format!("扫描失败: {e}"))?;
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue, // 被占用或无权限的条目跳过
+        };
         if entry.depth() == 0 {
             continue;
         }
@@ -313,13 +345,20 @@ struct ScanRow {
     mtime: i64,
 }
 
-fn collect_scan_rows(root: &Path, exclude: &[String]) -> Result<Vec<ScanRow>, String> {
+fn collect_scan_rows(root: &Path, exclude: &[String]) -> Result<(Vec<ScanRow>, usize), String> {
     let mut rows = Vec::new();
+    let mut skipped = 0usize;
     for entry in WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !is_excluded(e, exclude))
     {
-        let entry = entry.map_err(|e| format!("扫描失败: {e}"))?;
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => {
+                skipped += 1; // 被占用或无权限的条目跳过，不中断扫描
+                continue;
+            }
+        };
         if entry.depth() == 0 {
             continue;
         }
@@ -351,13 +390,41 @@ fn collect_scan_rows(root: &Path, exclude: &[String]) -> Result<Vec<ScanRow>, St
             ));
         }
     }
-    Ok(rows)
+    Ok((rows, skipped))
 }
 
-fn insert_rows(conn: &Connection, library_id: &str, rows: &[ScanRow]) -> Result<(), String> {
-    conn.execute("DELETE FROM files WHERE library_id = ?1", [library_id])
+/// 提取单个文本文件的正文并写入提取表与 FTS（调用方负责事务）。
+fn extract_and_index(conn: &Connection, root: &Path, file_id: i64, row: &ScanRow) {
+    let (status, text) = match std::fs::read(root.join(&row.relative_path)) {
+        Ok(bytes) if bytes.len() as u64 > MAX_EXTRACT_BYTES => ("too_large".to_string(), None),
+        Ok(bytes) => ("ok".to_string(), Some(String::from_utf8_lossy(&bytes).to_string())),
+        Err(_) => ("read_error".to_string(), None),
+    };
+    let _ = conn.execute(
+        "INSERT INTO extracted_content (file_id, extractor_version, status, text) VALUES (?1, 'v1', ?2, ?3)",
+        params![file_id, status, text],
+    );
+    if let Some(body) = text {
+        let _ = conn.execute(
+            "INSERT INTO search_fts (file_id, name, body) VALUES (?1, ?2, ?3)",
+            params![file_id, row.name, body],
+        );
+    }
+}
+
+fn insert_rows(conn: &Connection, library_id: &str, root: &Path, rows: &[ScanRow]) -> Result<usize, String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("开启索引事务失败: {e}"))?;
+    // 先清旧 FTS（files 删除后 file_id 失联），再重建文件索引：全程单事务，失败可回滚
+    tx.execute(
+        "DELETE FROM search_fts WHERE file_id IN (SELECT id FROM files WHERE library_id = ?1)",
+        [library_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM files WHERE library_id = ?1", [library_id])
         .map_err(|e| e.to_string())?;
-    let mut stmt = conn
+    let mut stmt = tx
         .prepare(
             "INSERT OR REPLACE INTO files
              (library_id, relative_path, name, parent_path, is_dir, format, size, mtime)
@@ -376,31 +443,47 @@ fn insert_rows(conn: &Connection, library_id: &str, rows: &[ScanRow]) -> Result<
             row.mtime,
         ])
         .map_err(|e| format!("写入索引失败: {e}"))?;
+        if !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str()) {
+            extract_and_index(&tx, root, tx.last_insert_rowid(), row);
+        }
     }
+    drop(stmt);
+    tx.commit().map_err(|e| format!("提交索引事务失败: {e}"))?;
     let file_count: i64 = rows.iter().filter(|r| !r.is_dir).count() as i64;
     conn.execute("UPDATE libraries SET file_count = ?1 WHERE id = ?2", params![file_count, library_id])
         .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(file_count as usize)
 }
 
-/// 完整扫描（同步版，供测试）：扫描 → 重建该库的索引记录。
-pub fn scan_library_now(conn: &Connection, library_id: &str, root: &Path, exclude: &[String]) -> Result<usize, String> {
-    let rows = collect_scan_rows(root, exclude)?;
-    insert_rows(conn, library_id, &rows)?;
-    Ok(rows.iter().filter(|r| !r.is_dir).count())
+/// 完整扫描结果：入库文件数与被跳过（被占用/无权限）的条目数。
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanOutcome {
+    pub file_count: usize,
+    pub skipped: usize,
 }
 
-/// 完整扫描（后台线程版）：分批写库并发送进度事件。
+/// 完整扫描（同步版，供测试与防抖重扫）：扫描 → 提取 → 重建该库索引。
+pub fn scan_library_now(conn: &Connection, library_id: &str, root: &Path, exclude: &[String]) -> Result<ScanOutcome, String> {
+    let (rows, skipped) = collect_scan_rows(root, exclude)?;
+    let file_count = insert_rows(conn, library_id, root, &rows)?;
+    Ok(ScanOutcome { file_count, skipped })
+}
+
+/// 完整扫描（后台线程版）：扫描 → 提取 → 重建索引，完成后发送事件。
 pub fn spawn_full_scan(app: AppHandle, state: AppState, library_id: String, root: PathBuf, exclude: Vec<String>) {
     std::thread::spawn(move || {
         let started = Instant::now();
         let result = scan_library_now(&state.0.lock().unwrap(), &library_id, &root, &exclude);
-        let file_count = result.as_ref().copied().unwrap_or(0);
-        let payload = json!({
-            "libraryId": library_id,
-            "fileCount": file_count,
-            "durationMs": started.elapsed().as_millis() as u64,
-        });
+        let payload = match &result {
+            Ok(outcome) => json!({
+                "libraryId": library_id,
+                "fileCount": outcome.file_count,
+                "skipped": outcome.skipped,
+                "durationMs": started.elapsed().as_millis() as u64,
+            }),
+            Err(err) => json!({ "libraryId": library_id, "error": err }),
+        };
         match result {
             Ok(_) => {
                 let _ = app.emit("scan:completed", payload);
@@ -459,6 +542,86 @@ pub fn get_file_detail(conn: &Connection, library_id: &str, relative_path: &str)
         row_to_file_entry,
     )
     .map_err(|e| format!("文件不存在: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// 全文检索
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHitDto {
+    #[serde(flatten)]
+    pub entry: FileEntryDto,
+    /// 命中片段（命中位置以【】标注）；文件名命中时为空
+    pub snippet: String,
+    /// name = 文件名命中；body = 正文命中
+    pub matched_in: String,
+}
+
+fn hit_from_row(row: &rusqlite::Row<'_>, query: &str, snippet: Option<String>) -> rusqlite::Result<SearchHitDto> {
+    let entry = row_to_file_entry(row)?;
+    let matched_in = if entry.name.to_lowercase().contains(&query.to_lowercase()) {
+        "name"
+    } else {
+        "body"
+    };
+    Ok(SearchHitDto {
+        entry,
+        snippet: snippet.unwrap_or_default(),
+        matched_in: matched_in.to_string(),
+    })
+}
+
+/// 在单个文档库内搜索：≥3 字符走 FTS5 trigram（文件名 + 正文），不足 3 字符仅按文件名匹配。
+pub fn search_library(conn: &Connection, library_id: &str, query: &str, limit: i64) -> Result<Vec<SearchHitDto>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if q.chars().count() >= 3 {
+        let match_q = format!("\"{}\"", q.replace('"', "\"\""));
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.*, snippet(search_fts, 2, '【', '】', '…', 16) AS snip
+                 FROM search_fts JOIN files f ON f.id = search_fts.file_id
+                 WHERE search_fts MATCH ?1 AND f.library_id = ?2 AND f.is_dir = 0
+                 LIMIT ?3",
+            )
+            .map_err(|e| format!("搜索失败: {e}"))?;
+        let rows = stmt
+            .query_map(params![match_q, library_id, limit], |row| {
+                let snip: String = row.get("snip")?;
+                hit_from_row(row, q, Some(snip))
+            })
+            .map_err(|e| format!("搜索失败: {e}"))?;
+        return rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string());
+    }
+
+    // 短查询回退：文件名 LIKE（转义通配符）
+    let mut escaped = String::new();
+    for ch in q.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT f.* FROM files f
+             WHERE f.library_id = ?1 AND f.is_dir = 0 AND f.name LIKE '%' || ?2 || '%' ESCAPE '\\'
+             ORDER BY f.name COLLATE NOCASE
+             LIMIT ?3",
+        )
+        .map_err(|e| format!("搜索失败: {e}"))?;
+    let rows = stmt
+        .query_map(params![library_id, escaped, limit], |row| hit_from_row(row, q, None))
+        .map_err(|e| format!("搜索失败: {e}"))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -524,8 +687,9 @@ mod tests {
         .unwrap();
         assert_eq!(lib.file_count, 0);
 
-        let count = scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
-        assert_eq!(count, 3);
+        let outcome = scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        assert_eq!(outcome.file_count, 3);
+        assert_eq!(outcome.skipped, 0);
 
         let lib = get_library(&conn, &lib.id).unwrap();
         assert_eq!(lib.file_count, 3);
@@ -577,5 +741,76 @@ mod tests {
         let result = quick_scan(&root, &["sub".to_string()]).unwrap();
         assert_eq!(result.file_count, 2); // 只剩根下两个文件
         assert_eq!(result.dir_count, 0);
+    }
+
+    #[test]
+    fn extraction_and_search_roundtrip() {
+        let conn = memory_db();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join("架构")).unwrap();
+        std::fs::write(
+            root.join("架构").join("负载均衡架构设计.md"),
+            "# 接入层设计\n\n为应对高并发访问，引入负载均衡（SLB）实现流量分发，\n支持多可用区部署，提升服务的高可用性。\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("系统配置.json"), "{\"engine\": \"sqlite-fts5\"}").unwrap();
+
+        let lib = create_library(
+            &conn,
+            CreateLibraryRequest {
+                root_path: root.to_string_lossy().to_string(),
+                name: None,
+                exclude_dirs: vec![],
+                full_text_index: true,
+                ocr_enabled: false,
+                portable_meta: false,
+            },
+        )
+        .unwrap();
+        let outcome = scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        assert_eq!(outcome.file_count, 2);
+        assert_eq!(outcome.skipped, 0);
+
+        // 长查询：FTS 命中；文件名与正文均含关键词时优先标记为文件名命中
+        let hits = search_library(&conn, &lib.id, "负载均衡", 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_in, "name");
+        assert!(hits[0].snippet.contains("负载均衡"));
+        assert_eq!(hits[0].entry.format, "markdown");
+
+        // 正文独有关键词（不在文件名中）→ 正文命中
+        let hits = search_library(&conn, &lib.id, "多可用区", 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_in, "body");
+        assert!(hits[0].snippet.contains("多可用区"));
+
+        // JSON 正文也可命中
+        let hits = search_library(&conn, &lib.id, "sqlite-fts5", 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.format, "json");
+
+        // 短查询（<3 字符）回退文件名匹配
+        let hits = search_library(&conn, &lib.id, "配置", 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_in, "name");
+        assert_eq!(hits[0].entry.name, "系统配置.json");
+
+        // 重复扫描不产生重复 FTS 记录
+        scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM search_fts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts_count, 2);
+
+        // 提取状态记录完整
+        let extracted: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM extracted_content WHERE status = 'ok'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(extracted, 2);
     }
 }

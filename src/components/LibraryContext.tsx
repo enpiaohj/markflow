@@ -20,6 +20,9 @@ export interface ScanStatus {
   error: string | null;
 }
 
+/** 主视图切换请求：Shell 监听 nonce 变化后切换到 target 视图 */
+export type ViewRequestTarget = "library" | "search";
+
 interface LibraryContextValue {
   /** 索引数据库中的全部文档库（按最近打开排序） */
   libraries: LibraryMeta[];
@@ -29,10 +32,15 @@ interface LibraryContextValue {
   scanStatus: ScanStatus;
   /** 建库向导是否打开 */
   wizardOpen: boolean;
-  /** 切换/创建文档库后自增；Shell 监听它把主视图切到「文档库」 */
-  viewRequest: number;
+  /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
+  viewRequest: { target: ViewRequestTarget; nonce: number };
+  /** 内容版本号：文件监听重扫 / 扫描完成后自增，驱动文档库视图刷新 */
+  contentVersion: number;
+  /** 搜索结果点击后的聚焦请求：文档库视图跳转并选中该文件 */
+  focusFile: { relativePath: string; nonce: number } | null;
   openWizard: () => void;
   closeWizard: () => void;
+  requestSearchView: () => void;
   /** 打开（切换到）指定文档库并刷新列表 */
   switchToLibrary: (id: string) => Promise<void>;
   /** 创建完成后调用：刷新列表、切到新库 */
@@ -41,18 +49,23 @@ interface LibraryContextValue {
   removeLibrary: (id: string) => Promise<void>;
   /** 回到未打开状态 */
   closeCurrentLibrary: () => void;
+  /** 聚焦到文档库中的某个文件（父目录 + 选中详情） */
+  requestFocusFile: (relativePath: string) => void;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
 
 const IDLE_SCAN: ScanStatus = { phase: "idle", libraryId: null, fileCount: 0, error: null };
+const INITIAL_VIEW: { target: ViewRequestTarget; nonce: number } = { target: "library", nonce: 0 };
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
   const [current, setCurrent] = useState<LibraryMeta | null>(null);
   const [scanStatus, setScanStatus] = useState<ScanStatus>(IDLE_SCAN);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [viewRequest, setViewRequest] = useState(0);
+  const [viewRequest, setViewRequest] = useState(INITIAL_VIEW);
+  const [contentVersion, setContentVersion] = useState(0);
+  const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -66,7 +79,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     void refreshLibraries();
   }, [refreshLibraries]);
 
-  // 后台扫描事件：驱动状态栏与列表刷新
+  // 后台扫描与文件监听事件
   useEffect(() => {
     const unlisteners: Promise<() => void>[] = [];
     unlisteners.push(
@@ -75,6 +88,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setCurrent((prev) =>
           prev && prev.id === event.payload.libraryId ? { ...prev, fileCount: event.payload.fileCount } : prev,
         );
+        setContentVersion((v) => v + 1);
         void refreshLibraries();
       }),
     );
@@ -82,6 +96,20 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       listen<{ libraryId: string; error: string }>("scan:failed", (event) => {
         setScanStatus({ phase: "failed", libraryId: event.payload.libraryId, fileCount: 0, error: event.payload.error });
         void refreshLibraries();
+      }),
+    );
+    unlisteners.push(
+      listen<{ libraryId: string; fileCount: number }>("library:changed", (event) => {
+        setCurrent((prev) =>
+          prev && prev.id === event.payload.libraryId ? { ...prev, fileCount: event.payload.fileCount } : prev,
+        );
+        setContentVersion((v) => v + 1);
+        void refreshLibraries();
+      }),
+    );
+    unlisteners.push(
+      listen<{ libraryId: string; error: string }>("library:rescan_failed", (event) => {
+        console.error("文件监听重扫失败", event.payload.error);
       }),
     );
     return () => {
@@ -98,7 +126,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       fileCount: meta.fileCount,
       error: null,
     });
-    setViewRequest((n) => n + 1);
+    setFocusFile(null);
+    setViewRequest({ target: "library", nonce: Date.now() });
+    api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
   }, []);
 
   const libraryCreated = useCallback(async (id: string) => {
@@ -107,7 +137,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setLibraries((prev) => [meta, ...prev.filter((l) => l.id !== id)]);
     setCurrent(meta);
     setScanStatus({ phase: "scanning", libraryId: meta.id, fileCount: 0, error: null });
-    setViewRequest((n) => n + 1);
+    setFocusFile(null);
+    setViewRequest({ target: "library", nonce: Date.now() });
+    api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
   }, []);
 
   const removeLibrary = useCallback(
@@ -116,11 +148,21 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       if (current?.id === id) {
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
+        api.setWatchedLibrary("").catch(() => {});
       }
       await refreshLibraries();
     },
     [current, refreshLibraries],
   );
+
+  const requestSearchView = useCallback(() => {
+    setViewRequest({ target: "search", nonce: Date.now() });
+  }, []);
+
+  const requestFocusFile = useCallback((relativePath: string) => {
+    setFocusFile({ relativePath, nonce: Date.now() });
+    setViewRequest({ target: "library", nonce: Date.now() });
+  }, []);
 
   const value = useMemo<LibraryContextValue>(
     () => ({
@@ -129,17 +171,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       scanStatus,
       wizardOpen,
       viewRequest,
+      contentVersion,
+      focusFile,
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
+      requestSearchView,
       switchToLibrary,
       libraryCreated,
       removeLibrary,
       closeCurrentLibrary: () => {
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
+        setFocusFile(null);
+        api.setWatchedLibrary("").catch(() => {});
       },
+      requestFocusFile,
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, switchToLibrary, libraryCreated, removeLibrary],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, requestSearchView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

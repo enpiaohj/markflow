@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, ListTodo, Search, Share2 } from "lucide-react";
+import { FolderOpen, ListTodo, Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
@@ -7,20 +7,15 @@ import CreateLibraryWizard from "./components/CreateLibraryWizard";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
+import SearchView from "./views/SearchView";
 import PlaceholderView from "./views/PlaceholderView";
 import SettingsView from "./views/SettingsView";
 import type { ViewId } from "./navigation";
 
 const placeholderViews: Record<
-  string,
-  { icon: typeof Search; title: string; description: string }
+  "graph" | "tasks" | "history",
+  { icon: typeof Share2; title: string; description: string }
 > = {
-  search: {
-    icon: Search,
-    title: "统一搜索",
-    description:
-      "文件名、正文、PDF 文本层、Office 文本、OCR 与转写的本地统一检索：组合语法筛选、命中片段高亮、定位到页 / 工作表 / 行。",
-  },
   graph: {
     icon: Share2,
     title: "关系图",
@@ -44,12 +39,24 @@ const placeholderViews: Record<
 /** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
 function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
-  const { viewRequest } = useLibrary();
+  const { viewRequest, requestSearchView } = useLibrary();
 
-  // 切换/创建文档库后自动跳到「文档库」视图
+  // 视图切换请求：切换/创建文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
   useEffect(() => {
-    if (viewRequest > 0) setActiveView("library");
+    if (viewRequest.nonce > 0) setActiveView(viewRequest.target);
   }, [viewRequest]);
+
+  // 全局快捷键 Ctrl+K 打开搜索
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        requestSearchView();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestSearchView]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-gray-50 text-gray-900">
@@ -59,9 +66,10 @@ function Shell() {
         <main className="min-w-0 flex-1 overflow-hidden">
           {activeView === "home" && <HomeView />}
           {activeView === "library" && <LibraryView />}
+          {activeView === "search" && <SearchView />}
           {activeView === "settings" && <SettingsView />}
-          {placeholderViews[activeView] && (
-            <PlaceholderView {...placeholderViews[activeView]} />
+          {placeholderViews[activeView as "graph" | "tasks" | "history"] && (
+            <PlaceholderView {...placeholderViews[activeView as "graph" | "tasks" | "history"]} />
           )}
         </main>
       </div>
