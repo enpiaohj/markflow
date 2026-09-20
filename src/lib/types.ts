@@ -66,3 +66,16 @@ export type SearchHit = FileEntry & {
   /** name = 文件名命中；body = 正文命中 */
   matchedIn: "name" | "body";
 };
+
+/** 后台任务（scan:completed / tasks:updated 载荷对应 Rust tasks.rs） */
+export interface TaskInfo {
+  id: string;
+  kind: "scan" | "rescan";
+  title: string;
+  status: "running" | "completed" | "failed" | "canceled";
+  processed: number;
+  detail: string | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+}

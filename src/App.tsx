@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, ListTodo, Share2 } from "lucide-react";
+import { FolderOpen, Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import CreateLibraryWizard from "./components/CreateLibraryWizard";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
+import { TasksProvider } from "./components/TasksContext";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
 import SearchView from "./views/SearchView";
+import TasksView from "./views/TasksView";
 import PlaceholderView from "./views/PlaceholderView";
 import SettingsView from "./views/SettingsView";
 import type { ViewId } from "./navigation";
 
 const placeholderViews: Record<
-  "graph" | "tasks" | "history",
+  "graph" | "history",
   { icon: typeof Share2; title: string; description: string }
 > = {
   graph: {
@@ -21,12 +23,6 @@ const placeholderViews: Record<
     title: "关系图",
     description:
       "跨文档关联：Markdown 链接、手动关联与自动建议形成知识网络，支持图谱与列表视图，文件移动后按稳定 ID 恢复关系。",
-  },
-  tasks: {
-    icon: ListTodo,
-    title: "后台任务中心",
-    description:
-      "统一管理索引、OCR、转写、AI、转换与导出任务：排队、运行、暂停、取消、失败原因与重试入口。",
   },
   history: {
     icon: FolderOpen,
@@ -67,9 +63,10 @@ function Shell() {
           {activeView === "home" && <HomeView />}
           {activeView === "library" && <LibraryView />}
           {activeView === "search" && <SearchView />}
+          {activeView === "tasks" && <TasksView />}
           {activeView === "settings" && <SettingsView />}
-          {placeholderViews[activeView as "graph" | "tasks" | "history"] && (
-            <PlaceholderView {...placeholderViews[activeView as "graph" | "tasks" | "history"]} />
+          {placeholderViews[activeView as "graph" | "history"] && (
+            <PlaceholderView {...placeholderViews[activeView as "graph" | "history"]} />
           )}
         </main>
       </div>
@@ -82,7 +79,9 @@ function Shell() {
 export default function App() {
   return (
     <LibraryProvider>
-      <Shell />
+      <TasksProvider>
+        <Shell />
+      </TasksProvider>
     </LibraryProvider>
   );
 }

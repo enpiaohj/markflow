@@ -116,17 +116,42 @@ pub fn stop_watching(slot: &Mutex<Option<WatchSession>>) {
     }
 }
 
-/// 防抖到期：重扫当前库并发送变更事件。
+/// 防抖到期：登记任务 → 重扫当前库 → 发送变更事件。
 fn rescan_current(app: &AppHandle, library_id: &str) {
     let state = app.state::<AppState>();
+    let tasks = app.state::<crate::tasks::TaskManager>();
     let conn = state.0.lock().unwrap();
     let Ok(meta) = library::get_library(&conn, library_id) else {
         return;
     };
     let exclude = library::excludes_from(&meta.settings);
     let root = std::path::PathBuf::from(&meta.root_path);
-    match library::scan_library_now(&conn, library_id, &root, &exclude) {
+
+    let task_id = tasks.begin(
+        crate::tasks::TaskKind::Rescan,
+        &format!("自动重扫 · {}", meta.name),
+    );
+    let cancel = tasks.attach_cancel(&task_id);
+    crate::tasks::emit_tasks(app, &tasks);
+
+    let mgr = tasks.inner().clone();
+    let progress = |processed: u64| {
+        mgr.progress(&task_id, processed);
+    };
+    match library::scan_library_with(
+        &conn,
+        library_id,
+        &root,
+        &exclude,
+        library::ScanOptions { cancel: Some(&cancel), on_progress: Some(&progress) },
+    ) {
         Ok(outcome) => {
+            mgr.finish(
+                &task_id,
+                crate::tasks::TaskStatus::Completed,
+                Some(format!("{} 个文件 · {} 项跳过", outcome.file_count, outcome.skipped)),
+                None,
+            );
             drop(conn);
             let _ = app.emit(
                 "library:changed",
@@ -137,7 +162,11 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
                 }),
             );
         }
+        Err(err) if err == library::ERR_CANCELED => {
+            mgr.finish(&task_id, crate::tasks::TaskStatus::Canceled, None, None);
+        }
         Err(err) => {
+            mgr.finish(&task_id, crate::tasks::TaskStatus::Failed, None, Some(err.clone()));
             drop(conn);
             let _ = app.emit(
                 "library:rescan_failed",
@@ -145,6 +174,7 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
             );
         }
     }
+    crate::tasks::emit_tasks(app, &mgr);
 }
 
 #[cfg(test)]

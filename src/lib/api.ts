@@ -5,6 +5,7 @@ import type {
   LibraryMeta,
   QuickScanResult,
   SearchHit,
+  TaskInfo,
 } from "./types";
 
 export function appInfo(): Promise<{ name: string; version: string }> {
@@ -53,4 +54,16 @@ export function searchLibrary(
 /** libraryId 传空字符串表示停止监听 */
 export function setWatchedLibrary(libraryId: string): Promise<void> {
   return invoke("set_watched_library", { libraryId });
+}
+
+export function listTasks(): Promise<TaskInfo[]> {
+  return invoke("list_tasks");
+}
+
+export function cancelTask(id: string): Promise<boolean> {
+  return invoke("cancel_task", { id });
+}
+
+export function clearFinishedTasks(): Promise<number> {
+  return invoke("clear_finished_tasks");
 }

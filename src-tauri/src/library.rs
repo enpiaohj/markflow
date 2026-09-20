@@ -345,13 +345,29 @@ struct ScanRow {
     mtime: i64,
 }
 
-fn collect_scan_rows(root: &Path, exclude: &[String]) -> Result<(Vec<ScanRow>, usize), String> {
+fn collect_scan_rows(
+    root: &Path,
+    exclude: &[String],
+    cancel: Option<&std::sync::atomic::AtomicBool>,
+    on_progress: Option<&dyn Fn(u64)>,
+) -> Result<(Vec<ScanRow>, usize), String> {
+    use std::sync::atomic::Ordering;
     let mut rows = Vec::new();
     let mut skipped = 0usize;
     for entry in WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| !is_excluded(e, exclude))
     {
+        if let Some(flag) = cancel {
+            if flag.load(Ordering::Relaxed) {
+                return Err(ERR_CANCELED.into());
+            }
+        }
+        if let Some(report) = on_progress {
+            if rows.len() % 256 == 0 {
+                report(rows.len() as u64);
+            }
+        }
         let entry = match entry {
             Ok(e) => e,
             Err(_) => {
@@ -463,35 +479,85 @@ pub struct ScanOutcome {
     pub skipped: usize,
 }
 
-/// 完整扫描（同步版，供测试与防抖重扫）：扫描 → 提取 → 重建该库索引。
-pub fn scan_library_now(conn: &Connection, library_id: &str, root: &Path, exclude: &[String]) -> Result<ScanOutcome, String> {
-    let (rows, skipped) = collect_scan_rows(root, exclude)?;
+/// 取消哨兵：collect_scan_rows / scan_library_with 以该错误串表示任务被取消。
+pub const ERR_CANCELED: &str = "SCAN_CANCELED";
+
+/// 扫描可选行为：取消旗标与进度回调。
+#[derive(Default)]
+pub struct ScanOptions<'a> {
+    pub cancel: Option<&'a std::sync::atomic::AtomicBool>,
+    pub on_progress: Option<&'a dyn Fn(u64)>,
+}
+
+/// 完整扫描（可带取消与进度）：扫描 → 提取 → 重建该库索引。
+pub fn scan_library_with(conn: &Connection, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
+    let (rows, skipped) = collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?;
     let file_count = insert_rows(conn, library_id, root, &rows)?;
     Ok(ScanOutcome { file_count, skipped })
 }
 
-/// 完整扫描（后台线程版）：扫描 → 提取 → 重建索引，完成后发送事件。
-pub fn spawn_full_scan(app: AppHandle, state: AppState, library_id: String, root: PathBuf, exclude: Vec<String>) {
+/// 完整扫描（后台线程版，纳入任务中心）：扫描 → 提取 → 重建索引，
+/// 全程通过 `tasks:updated` 上报进度，结束后发送 `scan:completed` / `scan:failed` / `scan:canceled`。
+pub fn spawn_full_scan(
+    app: AppHandle,
+    state: AppState,
+    tasks: crate::tasks::TaskManager,
+    library_id: String,
+    library_name: String,
+    root: PathBuf,
+    exclude: Vec<String>,
+) {
     std::thread::spawn(move || {
         let started = Instant::now();
-        let result = scan_library_now(&state.0.lock().unwrap(), &library_id, &root, &exclude);
-        let payload = match &result {
-            Ok(outcome) => json!({
-                "libraryId": library_id,
-                "fileCount": outcome.file_count,
-                "skipped": outcome.skipped,
-                "durationMs": started.elapsed().as_millis() as u64,
-            }),
-            Err(err) => json!({ "libraryId": library_id, "error": err }),
+        let task_id = tasks.begin(crate::tasks::TaskKind::Scan, &format!("扫描索引 · {library_name}"));
+        let cancel = tasks.attach_cancel(&task_id);
+        crate::tasks::emit_tasks(&app, &tasks);
+
+        let mgr_for_progress = tasks.clone();
+        let progress = |processed: u64| {
+            mgr_for_progress.progress(&task_id, processed);
         };
-        match result {
-            Ok(_) => {
-                let _ = app.emit("scan:completed", payload);
+        let result = scan_library_with(
+            &state.0.lock().unwrap(),
+            &library_id,
+            &root,
+            &exclude,
+            ScanOptions { cancel: Some(&cancel), on_progress: Some(&progress) },
+        );
+
+        match &result {
+            Ok(outcome) => {
+                tasks.finish(
+                    &task_id,
+                    crate::tasks::TaskStatus::Completed,
+                    Some(format!("{} 个文件 · {} 项跳过", outcome.file_count, outcome.skipped)),
+                    None,
+                );
+                let _ = app.emit(
+                    "scan:completed",
+                    json!({
+                        "libraryId": library_id,
+                        "fileCount": outcome.file_count,
+                        "skipped": outcome.skipped,
+                        "durationMs": started.elapsed().as_millis() as u64,
+                    }),
+                );
+            }
+            Err(err) if err == ERR_CANCELED => {
+                tasks.finish(&task_id, crate::tasks::TaskStatus::Canceled, None, None);
+                let _ = app.emit("scan:canceled", json!({ "libraryId": library_id }));
             }
             Err(err) => {
+                tasks.finish(
+                    &task_id,
+                    crate::tasks::TaskStatus::Failed,
+                    None,
+                    Some(err.clone()),
+                );
                 let _ = app.emit("scan:failed", json!({ "libraryId": library_id, "error": err }));
             }
         }
+        crate::tasks::emit_tasks(&app, &tasks);
     });
 }
 
@@ -687,7 +753,7 @@ mod tests {
         .unwrap();
         assert_eq!(lib.file_count, 0);
 
-        let outcome = scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        let outcome = scan_library_with(&conn, &lib.id, &root, &[], ScanOptions::default()).unwrap();
         assert_eq!(outcome.file_count, 3);
         assert_eq!(outcome.skipped, 0);
 
@@ -743,6 +809,90 @@ mod tests {
         assert_eq!(result.dir_count, 0);
     }
 
+    /// 技术验证 Spike（设计文档 §17.1）：5 万混合文件库的扫描、提取、FTS5 索引与检索性能。
+    /// 默认忽略，手动运行：
+    ///   cargo test --profile spike spike_50k -- --ignored --nocapture
+    /// 参考目标（设计文档 §13.1，10 万文件规模）：文件名搜索首屏 ≤ 200ms，全文搜索首屏 ≤ 500ms。
+    #[test]
+    #[ignore = "性能 Spike：生成 5 万文件需要较长时间，按上述命令手动运行"]
+    fn spike_50k_files_scan_and_search() {
+        let conn = memory_db();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let dirs = 100;
+        let files_per_dir = 500;
+        let total = dirs * files_per_dir;
+
+        let t_gen = Instant::now();
+        for d in 0..dirs {
+            let dir_path = root.join(format!("{d:03}_分类目录"));
+            std::fs::create_dir_all(&dir_path).unwrap();
+            for f in 0..files_per_dir {
+                let keyword = if f % 10 == 0 { "本方案采用负载均衡实现流量分发与高可用部署。" } else { "系统采用分层架构设计，保障可用性、可扩展性与安全性。" };
+                let body = format!(
+                    "# 技术文档 {d}-{f}\n\n{keyword}\n\n## 要点\n\n- 配置项 config-{d}-{f} 已按规范填写\n- 数据校验与日志记录遵循运维手册要求\n"
+                );
+                let name = match f % 3 {
+                    0 => format!("技术方案-{d}-{f}.md"),
+                    1 => format!("服务器清单-{d}-{f}.csv"),
+                    _ => format!("系统配置-{d}-{f}.json"),
+                };
+                std::fs::write(dir_path.join(name), body).unwrap();
+            }
+        }
+        println!("[Spike] 生成 {} 个文件: {:?}", total, t_gen.elapsed());
+
+        let lib = create_library(
+            &conn,
+            CreateLibraryRequest {
+                root_path: root.to_string_lossy().to_string(),
+                name: Some("Spike 库".into()),
+                exclude_dirs: vec![],
+                full_text_index: true,
+                ocr_enabled: false,
+                portable_meta: false,
+            },
+        )
+        .unwrap();
+
+        // 首次全量扫描 + 文本提取 + FTS5 索引
+        let t_scan = Instant::now();
+        let outcome = scan_library_with(&conn, &lib.id, &root, &[], ScanOptions::default()).unwrap();
+        let scan_elapsed = t_scan.elapsed();
+        assert_eq!(outcome.file_count, total);
+        assert_eq!(outcome.skipped, 0);
+        println!("[Spike] 首次扫描+提取+索引: {:?}（{} 文件/秒）", scan_elapsed, total as u128 * 1000 / scan_elapsed.as_millis().max(1));
+
+        let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM search_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(fts_count, total as i64);
+
+        // 正文关键词检索（命中 1/10 的文件）
+        let t_search = Instant::now();
+        let hits = search_library(&conn, &lib.id, "负载均衡", 10_000).unwrap();
+        let search_elapsed = t_search.elapsed();
+        assert_eq!(hits.len(), total / 10);
+        println!("[Spike] 全文搜索「负载均衡」（命中 {}）: {:?}", hits.len(), search_elapsed);
+
+        // 文件名检索
+        let t_name = Instant::now();
+        let hits = search_library(&conn, &lib.id, "技术方案-42-117", 100).unwrap();
+        println!("[Spike] 文件名搜索: {:?}（命中 {}）", t_name.elapsed(), hits.len());
+        assert_eq!(hits.len(), 1);
+
+        // 重建索引（模拟文件监听触发的全量重扫）
+        let t_rescan = Instant::now();
+        let outcome = scan_library_with(&conn, &lib.id, &root, &[], ScanOptions::default()).unwrap();
+        println!("[Spike] 全量重建索引: {:?}（{} 个文件）", t_rescan.elapsed(), outcome.file_count);
+        assert_eq!(outcome.file_count, total);
+
+        // 重建后 FTS 无重复
+        let fts_after: i64 = conn.query_row("SELECT COUNT(*) FROM search_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(fts_after, total as i64);
+
+        println!("[Spike] 完成。扫描 {:?} | 搜索 {:?} | 重建 {:?}",
+            scan_elapsed, search_elapsed, t_rescan.elapsed());
+    }
+
     #[test]
     fn extraction_and_search_roundtrip() {
         let conn = memory_db();
@@ -768,7 +918,7 @@ mod tests {
             },
         )
         .unwrap();
-        let outcome = scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        let outcome = scan_library_with(&conn, &lib.id, &root, &[], ScanOptions::default()).unwrap();
         assert_eq!(outcome.file_count, 2);
         assert_eq!(outcome.skipped, 0);
 
@@ -797,7 +947,7 @@ mod tests {
         assert_eq!(hits[0].entry.name, "系统配置.json");
 
         // 重复扫描不产生重复 FTS 记录
-        scan_library_now(&conn, &lib.id, &root, &[]).unwrap();
+        scan_library_with(&conn, &lib.id, &root, &[], ScanOptions::default()).unwrap();
         let fts_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM search_fts", [], |row| row.get(0))
             .unwrap();

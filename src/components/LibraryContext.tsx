@@ -21,7 +21,7 @@ export interface ScanStatus {
 }
 
 /** 主视图切换请求：Shell 监听 nonce 变化后切换到 target 视图 */
-export type ViewRequestTarget = "library" | "search";
+export type ViewRequestTarget = "library" | "search" | "tasks";
 
 interface LibraryContextValue {
   /** 索引数据库中的全部文档库（按最近打开排序） */
@@ -41,6 +41,7 @@ interface LibraryContextValue {
   openWizard: () => void;
   closeWizard: () => void;
   requestSearchView: () => void;
+  requestTasksView: () => void;
   /** 打开（切换到）指定文档库并刷新列表 */
   switchToLibrary: (id: string) => Promise<void>;
   /** 创建完成后调用：刷新列表、切到新库 */
@@ -108,6 +109,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       }),
     );
     unlisteners.push(
+      listen<{ libraryId: string }>("scan:canceled", (event) => {
+        setScanStatus((prev) =>
+          prev.libraryId === event.payload.libraryId
+            ? { phase: "idle", libraryId: event.payload.libraryId, fileCount: prev.fileCount, error: null }
+            : prev,
+        );
+      }),
+    );
+    unlisteners.push(
       listen<{ libraryId: string; error: string }>("library:rescan_failed", (event) => {
         console.error("文件监听重扫失败", event.payload.error);
       }),
@@ -159,6 +169,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setViewRequest({ target: "search", nonce: Date.now() });
   }, []);
 
+  const requestTasksView = useCallback(() => {
+    setViewRequest({ target: "tasks", nonce: Date.now() });
+  }, []);
+
   const requestFocusFile = useCallback((relativePath: string) => {
     setFocusFile({ relativePath, nonce: Date.now() });
     setViewRequest({ target: "library", nonce: Date.now() });
@@ -176,6 +190,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
       requestSearchView,
+      requestTasksView,
       switchToLibrary,
       libraryCreated,
       removeLibrary,
@@ -187,7 +202,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       requestFocusFile,
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, requestSearchView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

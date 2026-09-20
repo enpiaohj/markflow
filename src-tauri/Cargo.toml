@@ -31,6 +31,11 @@ notify = "7"
 [dev-dependencies]
 tempfile = "3"
 
+# 性能 Spike 专用 profile：接近 release 的优化但编译更快（cargo test --profile spike）
+[profile.spike]
+inherits = "release"
+lto = false
+codegen-units = 16
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

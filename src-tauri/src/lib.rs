@@ -1,5 +1,6 @@
 mod format;
 mod library;
+mod tasks;
 mod watch;
 
 use library::{AppState, CreateLibraryRequest};
@@ -30,6 +31,7 @@ fn quick_scan_library(root_path: String, exclude_dirs: Vec<String>) -> Result<li
 fn create_library(
     app: AppHandle,
     state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
     request: CreateLibraryRequest,
 ) -> Result<library::LibraryMeta, String> {
     let meta = library::create_library(&state.0.lock().unwrap(), request)?;
@@ -37,7 +39,9 @@ fn create_library(
     library::spawn_full_scan(
         app,
         state.inner().clone(),
+        tasks.inner().clone(),
         meta.id.clone(),
+        meta.name.clone(),
         meta.root_path.clone().into(),
         exclude,
     );
@@ -101,6 +105,34 @@ fn set_watched_library(
     watch::start_watching(&app, &state.0.lock().unwrap(), &watch.0, library_id)
 }
 
+#[tauri::command]
+fn list_tasks(tasks: State<'_, tasks::TaskManager>) -> Vec<tasks::TaskInfo> {
+    tasks.list()
+}
+
+#[tauri::command]
+fn cancel_task(
+    app: AppHandle,
+    tasks: State<'_, tasks::TaskManager>,
+    id: String,
+) -> bool {
+    let canceled = tasks.cancel(&id);
+    if canceled {
+        tasks::emit_tasks(&app, &tasks);
+    }
+    canceled
+}
+
+#[tauri::command]
+fn clear_finished_tasks(
+    app: AppHandle,
+    tasks: State<'_, tasks::TaskManager>,
+) -> usize {
+    let removed = tasks.clear_finished();
+    tasks::emit_tasks(&app, &tasks);
+    removed
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -110,6 +142,7 @@ pub fn run() {
             let conn = library::init_db(app.handle())?;
             app.manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(conn))));
             app.manage(WatchState(std::sync::Mutex::new(None)));
+            app.manage(tasks::TaskManager::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -123,6 +156,9 @@ pub fn run() {
             get_file_detail,
             search_library,
             set_watched_library,
+            list_tasks,
+            cancel_task,
+            clear_finished_tasks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
