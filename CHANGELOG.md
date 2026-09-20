@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 原生编辑闭环（v0.2 核心）：
+  - Markdown 可视化编辑器（Tiptap v3 / ProseMirror 分页画布 + tiptap-markdown 往返，
+    支持标题、列表、任务列表、表格、引用、代码块、图片）与源码模式（CodeMirror 6，
+    Markdown/JSON/YAML 语法高亮）随时互切，Markdown 文件为持久化真源。
+  - 文本类格式（MD/TXT/代码/JSON/YAML/XML/配置/CSV）双击即编辑，Ctrl+S 保存。
+  - 保存闭环：外部修改冲突检测（基线 mtime 三选一对话框：覆盖保存 / 重新载入 /
+    取消）、临时文件 + fsync + 原子替换、保存后自动重建该文件全文索引。
+  - 历史快照与恢复：每次保存前自动快照（每文件保留 20 个），编辑器内置历史面板
+    与「历史」恢复中心（按库浏览、一键恢复，恢复前自动再快照）。
+
 - 后台任务中心（§8.16 首批）：任务管理器登记扫描/自动重扫任务，
   实时进度（已处理条目数）、取消（扫描循环检查取消旗标）、完成摘要、
   失败原因与历史清理（内存保留 100 条，持久化随 OCR/AI/导出任务交付）；

@@ -4,8 +4,11 @@ import type {
   FileEntry,
   LibraryMeta,
   QuickScanResult,
+  SaveOutcome,
   SearchHit,
   TaskInfo,
+  TextFileContent,
+  VersionInfo,
 } from "./types";
 
 export function appInfo(): Promise<{ name: string; version: string }> {
@@ -66,4 +69,38 @@ export function cancelTask(id: string): Promise<boolean> {
 
 export function clearFinishedTasks(): Promise<number> {
   return invoke("clear_finished_tasks");
+}
+
+// ---------------------------------------------------------------------------
+// 原生编辑（v0.2）
+// ---------------------------------------------------------------------------
+
+export function readTextFile(libraryId: string, relativePath: string): Promise<TextFileContent> {
+  return invoke("read_text_file", { libraryId, relativePath });
+}
+
+export function saveTextFile(
+  libraryId: string,
+  relativePath: string,
+  content: string,
+  baseMtime: number,
+  force: boolean,
+): Promise<SaveOutcome> {
+  return invoke("save_text_file", { libraryId, relativePath, content, baseMtime, force });
+}
+
+export function listFileVersions(libraryId: string, relativePath: string): Promise<VersionInfo[]> {
+  return invoke("list_file_versions", { libraryId, relativePath });
+}
+
+export function listRecentVersions(libraryId: string, limit = 100): Promise<VersionInfo[]> {
+  return invoke("list_recent_versions", { libraryId, limit });
+}
+
+export function restoreFileVersion(
+  libraryId: string,
+  relativePath: string,
+  versionId: number,
+): Promise<SaveOutcome> {
+  return invoke("restore_file_version", { libraryId, relativePath, versionId });
 }
