@@ -38,10 +38,21 @@ pub fn detect_soffice() -> Option<PathBuf> {
         .filter(|p| p.is_file())
 }
 
+/// 探测 msedge.exe（PDF 打印管线，Windows 11 内置）。
+pub fn detect_edge() -> Option<PathBuf> {
+    find_in_path("msedge.exe")
+        .or_else(|| known_locations(&[
+            "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+            "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+        ]))
+        .filter(|p| p.is_file())
+}
+
 /// 汇总组件健康状态（供设置页与能力按钮）。
 pub fn list_components() -> Vec<ComponentStatus> {
     let pandoc = detect_pandoc();
     let soffice = detect_soffice();
+    let edge = detect_edge();
     vec![
         ComponentStatus {
             name: "pandoc".into(),
@@ -56,6 +67,13 @@ pub fn list_components() -> Vec<ComponentStatus> {
             found: soffice.is_some(),
             version: soffice.as_ref().map(|p| probe_version(p, &["--version"])).unwrap_or_default(),
             path: soffice.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+        },
+        ComponentStatus {
+            name: "msedge".into(),
+            label: "Microsoft Edge（PDF 输出管线）".into(),
+            found: edge.is_some(),
+            version: edge.as_ref().map(|p| probe_version(p, &["--version"])).unwrap_or_default(),
+            path: edge.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
         },
     ]
 }

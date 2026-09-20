@@ -9,6 +9,7 @@ import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
 import { TasksProvider } from "./components/TasksContext";
+import DeliveryView from "./views/DeliveryView";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
 import SearchView from "./views/SearchView";
@@ -33,7 +34,7 @@ const placeholderViews: Record<
 /** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
 function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
-  const { viewRequest, requestSearchView, openFile, viewerFile, current } = useLibrary();
+  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, current } = useLibrary();
 
   // 视图切换请求：切换/创建文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
   useEffect(() => {
@@ -60,6 +61,8 @@ function Shell() {
         <main className="min-w-0 flex-1 overflow-hidden">
           {openFile && current ? (
             <EditorPane />
+          ) : deliveryOpen && current ? (
+            <DeliveryView />
           ) : viewerFile && current ? (
             viewerFile.kind === "pdf" ? (
               <PdfViewer />

@@ -2,6 +2,7 @@ mod ai;
 mod checks;
 mod component_manager;
 mod convert;
+mod delivery;
 mod editor;
 mod format;
 mod library;
@@ -489,6 +490,114 @@ fn create_text_file(
     outcome
 }
 
+/// 交付预检（质量门禁 + 敏感扫描 + 来源冻结哈希）。
+#[tauri::command]
+fn delivery_precheck(
+    state: State<'_, AppState>,
+    library_id: String,
+    sources: Vec<String>,
+) -> Result<delivery::PrecheckReport, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    delivery::precheck(std::path::Path::new(&root), &sources)
+}
+
+/// 启动交付：预检 → 冻结来源 → 后台生成/验证/原子落盘 → `delivery:completed` 事件。
+#[tauri::command]
+fn delivery_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    sources: Vec<String>,
+    formats: Vec<String>,
+    target_dir: String,
+) -> Result<delivery::DeliveryRecord, String> {
+    if sources.is_empty() {
+        return Err("请至少选择一个交付来源文件".into());
+    }
+    if formats.is_empty() {
+        return Err("请至少选择一种交付格式".into());
+    }
+    // 服务端强制预检：错误项直接阻止（交付门禁）
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let report = delivery::precheck(std::path::Path::new(&root), &sources)?;
+    if !report.can_proceed {
+        return Err("预检存在错误项（如敏感信息或质量错误），已按交付门禁阻止。请在来源侧修复后重试。".into());
+    }
+
+    let record = delivery::DeliveryRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        library_id: library_id.clone(),
+        sources: report.files.clone(),
+        formats: formats.clone(),
+        target_dir: target_dir.clone(),
+        output_dir: None,
+        status: "running".into(),
+        error: None,
+        outputs: Vec::new(),
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0),
+    };
+    delivery::insert_record(&state.0.lock().unwrap(), &record)?;
+
+    let task_id = tasks.begin(tasks::TaskKind::Scan, "正式交付 · 多格式生成");
+    tasks::emit_tasks(&app, &tasks);
+
+    let app2 = app.clone();
+    let tasks2 = tasks.inner().clone();
+    let record_id = record.id.clone();
+    let root2 = root.clone();
+    let db = state.inner().0.clone();
+    std::thread::spawn(move || {
+        let result = delivery::execute(
+            std::path::Path::new(&root2),
+            &report,
+            &formats,
+            std::path::Path::new(&target_dir),
+        );
+        match &result {
+            Ok(outcome) => {
+                let dir = outcome.output_dir.to_string_lossy().to_string();
+                let _ = delivery::update_record(
+                    &db.lock().unwrap(),
+                    &record_id,
+                    "completed",
+                    None,
+                    Some(&dir),
+                    &outcome.outputs,
+                );
+                tasks2.finish(
+                    &task_id,
+                    tasks::TaskStatus::Completed,
+                    Some(format!("{} 个产物 → {}", outcome.outputs.len(), dir)),
+                    None,
+                );
+            }
+            Err(err) => {
+                let _ = delivery::update_record(&db.lock().unwrap(), &record_id, "failed", Some(err), None, &[]);
+                tasks2.finish(&task_id, tasks::TaskStatus::Failed, None, Some(err.clone()));
+            }
+        }
+        tasks::emit_tasks(&app2, &tasks2);
+        let _ = app2.emit(
+            "delivery:completed",
+            serde_json::json!({ "id": record_id, "ok": result.is_ok() }),
+        );
+    });
+    Ok(record)
+}
+
+#[tauri::command]
+fn list_delivery_history(
+    state: State<'_, AppState>,
+    library_id: String,
+    limit: Option<i64>,
+) -> Result<Vec<delivery::DeliveryRecord>, String> {
+    delivery::list_records(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(50))
+}
+
 fn library_file_path(
     state: &State<'_, AppState>,
     library_id: &str,
@@ -496,6 +605,15 @@ fn library_file_path(
 ) -> Result<PathBuf, String> {
     let root = library::get_library(&state.0.lock().unwrap(), library_id)?.root_path;
     Ok(PathBuf::from(root).join(relative_path))
+}
+
+/// 用系统文件管理器打开目录（交付产物所在文件夹等，用户经目录选择器授权的路径）。
+#[tauri::command]
+fn open_directory(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err("目录不存在".into());
+    }
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("打开目录失败: {e}"))
 }
 
 /// 读取可编辑文本文件（返回内容与冲突检测基线）。
@@ -621,6 +739,10 @@ pub fn run() {
             check_document,
             create_text_file,
             list_library_files,
+            delivery_precheck,
+            delivery_start,
+            list_delivery_history,
+            open_directory,
             convert_docx_to_markdown,
             convert_office_to_pdf,
             import_file,

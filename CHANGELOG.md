@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 正式交付中心（v0.5，§8.12/§8.9 交付门禁）：
+  - 五步流程：来源选择 → 交付格式 → 目标目录与预检 → 开始交付 → 交付历史；
+  - 质量门禁：预检服务端强制执行，错误项（敏感信息/断链/缺失文件等）直接阻止交付；
+  - 来源冻结：交付前对全部来源计算 SHA-256，交付清单记录冻结哈希与知情放行的预检提示；
+  - 多格式管线：Markdown 原文复制；HTML/DOCX 经 Pandoc 合并转换（库根为工作目录，
+    相对图片路径成立）；PDF 经 Pandoc→HTML→Edge headless 打印（HTML/CSS 管线）；
+    ZIP 打包全部产物；
+  - 可靠性：临时目录生成 → 产物验证（存在/非空/DOCX 有效性）→ 同卷原子改名落盘，
+    失败自动清理临时目录；任务中心登记进度，`delivery:completed` 事件通知；
+  - 交付历史持久化（export_jobs 表）：状态、产物、输出目录、失败原因与打开文件夹入口。
+  - 组件管理器新增 Microsoft Edge 探测（PDF 输出管线依赖）。
+
 - AI 工作台（v0.4，§8.6/§8.7/§8.9/§12）：
   - OpenAI 兼容 Provider 管理：API Key 存 Windows 凭据库（keyring），不落库、
     不回传前端；连通性测试区分网络 / 认证 / 地址 / 服务端问题；
