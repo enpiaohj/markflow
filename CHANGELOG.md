@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 文档库核心（v0.1 第一批功能）：
+  - Rust 侧格式注册表（17 类格式 + 回退）、SQLite 索引库（libraries / files 表）、
+    目录扫描（默认与自定义排除规则、隐藏项跳过、数量上限保护）与后台扫描事件。
+  - Tauri 命令：`list_libraries` / `quick_scan_library` / `create_library` / `open_library` /
+    `remove_library` / `list_children` / `get_file_detail`；接入 `tauri-plugin-dialog`。
+  - 前端建库向导（三步：选择文件夹 → 索引设置 → 确认创建，含轻量扫描预览与隐私说明）。
+  - 「文档库」三栏视图：目录树（懒加载）、面包屑、可排序文件列表、右侧详情面板。
+  - 标题栏文档库切换菜单（打开 / 移除索引 / 关闭），「开始」页最近文档库列表，
+    状态栏展示当前库与索引进度。
+  - Rust 单元测试 7 项（格式识别、扫描排除、库 CRUD 往返、自定义排除）。
+
 ## [0.1.0] - 2026-09-20
 
 ### Added

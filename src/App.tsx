@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderOpen, ListTodo, Search, Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
+import CreateLibraryWizard from "./components/CreateLibraryWizard";
+import { LibraryProvider, useLibrary } from "./components/LibraryContext";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
 import PlaceholderView from "./views/PlaceholderView";
@@ -39,15 +41,22 @@ const placeholderViews: Record<
   },
 };
 
-function App() {
+/** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
+function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
+  const { viewRequest } = useLibrary();
+
+  // 切换/创建文档库后自动跳到「文档库」视图
+  useEffect(() => {
+    if (viewRequest > 0) setActiveView("library");
+  }, [viewRequest]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-gray-50 text-gray-900">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar activeView={activeView} onSelect={setActiveView} />
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        <main className="min-w-0 flex-1 overflow-hidden">
           {activeView === "home" && <HomeView />}
           {activeView === "library" && <LibraryView />}
           {activeView === "settings" && <SettingsView />}
@@ -57,8 +66,15 @@ function App() {
         </main>
       </div>
       <StatusBar />
+      <CreateLibraryWizard />
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <LibraryProvider>
+      <Shell />
+    </LibraryProvider>
+  );
+}
