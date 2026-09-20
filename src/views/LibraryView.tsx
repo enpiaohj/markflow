@@ -86,7 +86,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor } = useLibrary();
+  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer } = useLibrary();
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -366,19 +366,27 @@ export default function LibraryView() {
                   <tr
                     key={entry.relativePath}
                     onClick={() => setSelected(entry)}
-                    onDoubleClick={() =>
-                      entry.isDir
-                        ? navigate(entry.relativePath)
-                        : EDITABLE_FORMATS.has(entry.format)
-                          ? openInEditor(entry.relativePath)
-                          : undefined
-                    }
+                    onDoubleClick={() => {
+                      if (entry.isDir) {
+                        navigate(entry.relativePath);
+                      } else if (entry.format === "pdf") {
+                        openInViewer(entry.relativePath, "pdf");
+                      } else if (entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint") {
+                        openInViewer(entry.relativePath, "office");
+                      } else if (EDITABLE_FORMATS.has(entry.format)) {
+                        openInEditor(entry.relativePath);
+                      }
+                    }}
                     title={
                       entry.isDir
                         ? "双击进入目录"
-                        : EDITABLE_FORMATS.has(entry.format)
-                          ? "双击编辑（Markdown 支持可视化 / 源码模式）"
-                          : "预览能力按 v0.3 路线交付"
+                        : entry.format === "pdf"
+                          ? "双击阅读（PDF.js）"
+                          : entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint"
+                            ? "双击快速预览（提取文本 / 工作表 / 幻灯片）"
+                            : EDITABLE_FORMATS.has(entry.format)
+                              ? "双击编辑（Markdown 支持可视化 / 源码模式）"
+                              : "使用系统应用打开（详见右侧详情）"
                     }
                     className={`cursor-default border-b border-gray-50 transition-colors ${
                       selected?.relativePath === entry.relativePath ? "bg-primary-50" : "hover:bg-gray-50"

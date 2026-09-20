@@ -1,6 +1,7 @@
 mod editor;
 mod format;
 mod library;
+mod office;
 mod tasks;
 mod watch;
 
@@ -134,6 +135,58 @@ fn clear_finished_tasks(
     removed
 }
 
+/// Office 快速预览（DOCX 段落 / XLSX 工作表 / PPTX 幻灯片）。
+#[tauri::command]
+fn get_office_preview(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<office::OfficePreview, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let path = std::path::Path::new(&root).join(&relative_path);
+    let format = crate::format::detect_format(
+        relative_path.rsplit('/').next().unwrap_or(&relative_path),
+    );
+    office::preview(&path, format)
+}
+
+/// 读取已登记文件的原始字节（供 PDF.js 等前端渲染器使用，二进制 IPC）。
+#[tauri::command]
+fn read_file_bytes(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let conn = state.0.lock().unwrap();
+    let registered: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0)",
+            rusqlite::params![library_id, relative_path],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !registered {
+        return Err("文件不存在于文档库索引".into());
+    }
+    let root = library::get_library(&conn, &library_id)?.root_path;
+    drop(conn);
+    let bytes = std::fs::read(std::path::Path::new(&root).join(&relative_path))
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// 使用系统默认应用打开已登记文件（Word/Excel/WPS 等）。
+#[tauri::command]
+fn open_path_in_system(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let path = std::path::Path::new(&root).join(&relative_path);
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
+}
+
 /// 读取可编辑文本文件（返回内容与冲突检测基线）。
 #[tauri::command]
 fn read_text_file(
@@ -243,6 +296,9 @@ pub fn run() {
             clear_finished_tasks,
             read_text_file,
             save_text_file,
+            get_office_preview,
+            read_file_bytes,
+            open_path_in_system,
             list_file_versions,
             list_recent_versions,
             restore_file_version,
