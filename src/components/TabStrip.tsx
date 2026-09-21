@@ -15,13 +15,16 @@ function tabIcon(tab: DocTab) {
 export default function TabStrip() {
   const { tabs, activeTabId, activateTab, closeTab, dirtyTabs } = useLibrary();
   if (tabs.length === 0) return null;
-  const multiLib = new Set(tabs.map((t) => t.lib.id)).size > 1;
+  const nameOf = (t: DocTab) => (t.kind === "delivery" ? "正式交付" : (t.relativePath.split("/").pop() ?? t.relativePath));
+  // 库名默认隐藏（悬停标签的提示里有）；只有不同库里出现同名文件时才在标签内显示，避免分不清
+  const names = tabs.map(nameOf);
+  const dupName = (t: DocTab) => names.filter((n) => n === nameOf(t)).length > 1;
 
   return (
     <div role="tablist" className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none]">
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
-        const name = tab.kind === "delivery" ? "正式交付" : (tab.relativePath.split("/").pop() ?? tab.relativePath);
+        const name = nameOf(tab);
         const dirty = dirtyTabs.has(tab.id);
         return (
           <div
@@ -39,7 +42,7 @@ export default function TabStrip() {
           >
             {tabIcon(tab)}
             <span className="truncate">{name}</span>
-            {multiLib && <span className="shrink-0 rounded bg-primary-50 px-1 text-[10px] text-primary-700">{tab.lib.name}</span>}
+            {dupName(tab) && <span className="max-w-[70px] shrink-0 truncate text-[11px] text-gray-400">· {tab.lib.name}</span>}
             {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" title="有未保存的修改" />}
             <button
               type="button"
