@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/*
+ * MarkFlow 设计令牌
+ * 参考《01-产品设计/UI概念设计图》：浅色主题，主色 blue-600
+ */
+@theme {
+  --font-sans: "Microsoft YaHei", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* 桌面应用质感：正文区域默认不选中文本，输入框内恢复选择 */
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+/* Tiptap 可视化编辑器（文档画布，对应概念图「Markdown 可视化文档编辑器」） */
+.ProseMirror {
+  outline: none;
+  min-height: 50vh;
+  font-size: 15px;
+  line-height: 1.85;
+  color: #111827;
+}
+.ProseMirror > * + * { margin-top: 0.9em; }
+.ProseMirror h1 { font-size: 1.65em; font-weight: 700; margin-top: 1.2em; }
+.ProseMirror h2 { font-size: 1.32em; font-weight: 700; margin-top: 1.1em; }
+.ProseMirror h3 { font-size: 1.12em; font-weight: 600; margin-top: 1em; }
+.ProseMirror ul { list-style: disc; padding-left: 1.5em; }
+.ProseMirror ol { list-style: decimal; padding-left: 1.5em; }
+.ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0.15em; }
+.ProseMirror ul[data-type="taskList"] li { display: flex; gap: 0.55em; align-items: flex-start; }
+.ProseMirror ul[data-type="taskList"] li > label { margin-top: 0.4em; }
+.ProseMirror blockquote { border-left: 3px solid #93c5fd; padding-left: 1em; color: #4b5563; }
+.ProseMirror pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.85em 1.1em;
+  border-radius: 0.5em;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.88em;
+  overflow-x: auto;
+}
+.ProseMirror code {
+  font-family: Consolas, monospace;
+  background: #f3f4f6;
+  border-radius: 0.25em;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+.ProseMirror pre code { background: none; padding: 0; color: inherit; }
+.ProseMirror table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.ProseMirror th, .ProseMirror td { border: 1px solid #e5e7eb; padding: 0.45em 0.7em; vertical-align: top; text-align: left; }
+.ProseMirror th { background: #f9fafb; font-weight: 600; }
+.ProseMirror img { max-width: 100%; border-radius: 0.5em; }
+.ProseMirror hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.4em 0; }
+.ProseMirror input[type="checkbox"] { accent-color: #2563eb; cursor: pointer; }
