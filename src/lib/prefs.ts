@@ -45,6 +45,28 @@ export function setOfficeEngine(pref: OfficeEnginePref): void {
   }
 }
 
+const LAYOUT_KEY = "mf-pref-library-layout";
+
+/** 左侧文档库列表布局：selector 单库 + 顶部选择器（默认）/ side 并列多库（各库可折叠） */
+export type LibraryLayoutPref = "selector" | "side";
+
+export function getLibraryLayout(): LibraryLayoutPref {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "side" ? "side" : "selector";
+  } catch {
+    return "selector";
+  }
+}
+
+export function setLibraryLayout(pref: LibraryLayoutPref): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, pref);
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 const THEME_KEY = "mf-pref-theme";
 
 /** 主题：light 浅色（默认）/ dark 深色 / system 跟随系统 */

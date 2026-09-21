@@ -17,13 +17,14 @@ import {
   Trash2,
   TriangleAlert,
   X,
+  Check,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
-import { getOfficeEngine } from "../lib/prefs";
+import { getLibraryLayout, getOfficeEngine } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
 import type { FileEntry, LibraryMeta } from "../lib/types";
 
@@ -126,6 +127,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  */
 function LibrarySection({
   lib,
+  flat,
   active,
   expanded,
   contentVersion,
@@ -140,6 +142,8 @@ function LibrarySection({
   onContextMenu,
 }: {
   lib: LibraryMeta;
+  /** 单库选择器模式：不画库名行，目录树始终展开 */
+  flat?: boolean;
   active: boolean;
   expanded: boolean;
   contentVersion: number;
@@ -214,6 +218,18 @@ function LibrarySection({
     onContextMenu,
   };
 
+  if (flat) {
+    return (
+      <div>
+        {treeRoot.length === 0 ? (
+          <p className="py-2 text-center text-xs text-gray-400">（空）</p>
+        ) : (
+          treeRoot.map((entry) => <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />)
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mb-1">
       <div
@@ -273,9 +289,22 @@ function LibrarySection({
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
+  const { libraries, requestView, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
+  const [layout, setLayout] = useState(getLibraryLayout());
+  const [pickerOpen, setPickerOpen] = useState(false);
+  useEffect(() => {
+    const f = () => setLayout(getLibraryLayout());
+    window.addEventListener("markflow:prefs-changed", f);
+    return () => window.removeEventListener("markflow:prefs-changed", f);
+  }, []);
+  /** 选择器里可选的库：索引中的全部库（不含单文件隐式库），按名称排序 */
+  const pickable = useMemo(
+    () => libraries.filter((l) => !l.settings?.adhoc).sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN") || a.id.localeCompare(b.id)),
+    [libraries],
+  );
+  const selectorLib = current && !current.settings?.adhoc ? current : null;
   const [currentDir, setCurrentDir] = useState("");
   const [list, setList] = useState<FileEntry[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "name", asc: true });
@@ -518,7 +547,7 @@ export default function LibraryView() {
     return [...dirs.sort(by), ...files.sort(by)];
   }, [list, sort]);
 
-  if (!current && workspace.length === 0) {
+  if (!current && (layout === "side" ? workspace.length === 0 : libraries.length === 0)) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6">
         <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
@@ -554,6 +583,105 @@ export default function LibraryView() {
     <div className="flex h-full min-h-0">
       {/* 左侧：库信息、智能集合、目录树 */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
+        {layout === "selector" ? (
+          <>
+            {/* 文档库选择器：一次只显示一个库的目录树 */}
+            <div className="relative border-b border-gray-100 px-2 py-2">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen((v) => !v)}
+                  title={selectorLib ? selectorLib.rootPath : "选择文档库"}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left hover:bg-gray-50"
+                >
+                  <FolderOpen className="h-4 w-4 shrink-0 text-primary-600" />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-gray-900">
+                    {selectorLib ? selectorLib.name : "选择文档库"}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                </button>
+                {selectorLib && (
+                  <>
+                    <button type="button" title={`在「${selectorLib.name}」根目录新建文档`} onClick={() => openNewFile("", selectorLib)}
+                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
+                      <FilePlus2 className="h-4 w-4" />
+                    </button>
+                    <button type="button" title={`在「${selectorLib.name}」根目录新建文件夹`} onClick={() => openNewFolder("", selectorLib)}
+                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
+                      <FolderPlus className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+              {pickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setPickerOpen(false)} />
+                  <div className="absolute left-2 right-2 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                    {pickable.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">还没有文档库</p>}
+                    {pickable.map((lib) => (
+                      <button
+                        key={lib.id}
+                        type="button"
+                        onClick={() => {
+                          setPickerOpen(false);
+                          if (lib.id !== current?.id) inLibrary(lib, (h) => h.navigate(""));
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium text-gray-800">{lib.name}</span>
+                          <span className="block truncate text-[11px] text-gray-400">{lib.rootPath}</span>
+                        </span>
+                        {lib.id === current?.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary-600" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex gap-1 border-b border-gray-100 px-2 py-1.5 text-[12.5px]">
+              <span className="rounded-md bg-primary-50 px-2.5 py-1 font-medium text-primary-700">文件</span>
+              <span title="按路线图后续交付" className="cursor-not-allowed rounded-md px-2.5 py-1 text-gray-300">大纲</span>
+              <span title="按路线图后续交付" className="cursor-not-allowed rounded-md px-2.5 py-1 text-gray-300">引用</span>
+            </div>
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+              {selectorLib ? (
+                <LibrarySection
+                  key={selectorLib.id}
+                  lib={selectorLib}
+                  flat
+                  active
+                  expanded
+                  contentVersion={contentVersion}
+                  selectedPath={selected?.relativePath ?? null}
+                  onToggle={() => {}}
+                  onActivate={() => {}}
+                  onClose={() => {}}
+                  onNewFile={() => {}}
+                  onNewFolder={() => {}}
+                  onSelect={(entry) => inLibrary(selectorLib, (h) => h.handleSelect(entry))}
+                  onOpen={(entry) => inLibrary(selectorLib, (h) => h.openEntry(entry))}
+                  onContextMenu={(entry, x, y) => openContext(entry, x, y, selectorLib)}
+                />
+              ) : (
+                <p className="px-2 py-4 text-center text-xs text-gray-400">从上方选择器选择一个文档库</p>
+              )}
+            </nav>
+            <div className="space-y-0.5 border-t border-gray-100 px-2 py-2 text-[13px]">
+              <button type="button" onClick={openWizard}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-gray-600 hover:bg-gray-100">
+                <Plus className="h-3.5 w-3.5" />
+                添加文档库
+              </button>
+              <button type="button" onClick={() => requestView("home")}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-gray-600 hover:bg-gray-100">
+                <FolderOpen className="h-3.5 w-3.5" />
+                管理文档库
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         <div className="space-y-0.5 border-b border-gray-100 px-2 py-2">
           {SMART_COLLECTIONS.map(({ label, icon: Icon }) => (
             <button
@@ -600,6 +728,8 @@ export default function LibraryView() {
             />
           ))}
         </nav>
+          </>
+        )}
       </aside>
 
       {!current && (

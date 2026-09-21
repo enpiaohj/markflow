@@ -22,6 +22,9 @@ import {
   getAutosave,
   getOfficeEngine,
   getTheme,
+  getLibraryLayout,
+  setLibraryLayout,
+  type LibraryLayoutPref,
   setAutosave,
   setOfficeEngine,
   setTheme,
@@ -68,6 +71,7 @@ export default function SettingsView() {
 
   // ---- 偏好 ----
   const [theme, setThemeState] = useState<ThemePref>(getTheme());
+  const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
   const [autosave, setAutosaveState] = useState(getAutosave());
   const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
   const [shell, setShell] = useState<{ closeToTray: boolean; autostart: boolean } | null>(null);
@@ -231,6 +235,27 @@ export default function SettingsView() {
       ),
     },
     {
+      section: "appearance",
+      label: "文档库列表",
+      description: "单库：左侧顶部用选择器切换文档库，只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。",
+      keywords: "文档库 布局 选择器 并列 多库 折叠 侧栏",
+      node: (
+        <SettingRow key="layout" label="文档库列表" description="单库：左侧顶部用选择器切换文档库，只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。">
+          <Segmented
+            value={layout}
+            options={[
+              { key: "selector", label: "单库（选择器）" },
+              { key: "side", label: "并列多库" },
+            ]}
+            onChange={(v) => {
+              setLibraryLayout(v);
+              setLayoutState(v);
+            }}
+          />
+        </SettingRow>
+      ),
+    },
+    {
       section: "editor",
       label: "自动保存",
       description: AUTOSAVE_DESC,
@@ -278,7 +303,7 @@ export default function SettingsView() {
     const custom = SECTIONS.filter((s) => ["ai", "components", "about"].includes(s.id) && `${s.label} ${s.keywords}`.toLowerCase().includes(q));
     return { simple, custom };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, theme, autosave, officeEngine, shell, shellBusy]);
+  }, [q, theme, layout, autosave, officeEngine, shell, shellBusy]);
 
   const sectionLabel = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.label ?? "";
 
