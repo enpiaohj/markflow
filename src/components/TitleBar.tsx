@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ChevronDown, Check, FileText, FolderOpen, FolderPlus, Minus, Search, Square, Trash2, X } from "lucide-react";
+import { ChevronDown, Check, FolderOpen, FolderPlus, Minus, Search, Square, Trash2, X } from "lucide-react";
 import * as api from "../lib/api";
 import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
@@ -39,13 +39,11 @@ function WindowButton({
  * 窗口在 tauri.conf.json 中配置为 decorations: false。
  */
 export default function TitleBar() {
-  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView, openFile, viewerFile, deliveryOpen, closeDocument } = useLibrary();
+  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView } = useLibrary();
   const [version, setVersion] = useState("");
   useEffect(() => {
     void api.appInfo().then((i) => setVersion(i.version)).catch(() => {});
   }, []);
-  const docPath = openFile?.relativePath ?? viewerFile?.relativePath ?? (deliveryOpen ? "正式交付" : "");
-  const docName = docPath.split("/").pop() ?? docPath;
   const dialog = useDialog();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -172,23 +170,6 @@ export default function TitleBar() {
           </>
         )}
       </div>
-
-      {/* 当前打开的文档：显示名称并提供关闭入口（Ctrl+W） */}
-      {docPath && (
-        <div className="flex max-w-[260px] items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 py-0.5 pl-2 pr-0.5 text-[12px] text-gray-600">
-          <FileText className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-          <span className="truncate" title={docPath}>{docName}</span>
-          <button
-            type="button"
-            onClick={() => void closeDocument()}
-            title="关闭文档（Ctrl + W）"
-            aria-label="关闭文档"
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
 
       {/* 全局搜索入口：点击或 Ctrl+K 进入搜索视图 */}
       <div className="flex flex-1 justify-center">
