@@ -2,7 +2,7 @@
 
 MarkFlow 以 **GPL-3.0-only** 发布（见 [LICENSE](LICENSE)）。下列第三方组件按各自许可随应用分发或参与构建，其许可均与 GPL-3.0 兼容（MIT / Apache-2.0 / BSD / ISC / MPL-2.0 / Zlib / Unicode / CC0 等宽松或弱 Copyleft 许可；双许可组件按可兼容的一项使用，如 jszip 选用 MIT）。
 
-> 本清单由锁文件（package-lock.json、Cargo.lock）在 v0.6.0 发布时生成（`node scripts/gen-third-party-notices.mjs`），含平台条件依赖（仅在对应平台编译）与构建期依赖；各组件版权归其作者所有，许可全文见其上游仓库。
+> 本清单由锁文件（package-lock.json、Cargo.lock）在 v0.6.1 发布时生成（`node scripts/gen-third-party-notices.mjs`），含平台条件依赖（仅在对应平台编译）与构建期依赖；各组件版权归其作者所有，许可全文见其上游仓库。
 
 ## 不随应用分发的外部工具
 
