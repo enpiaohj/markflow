@@ -36,6 +36,8 @@ interface PendingHandlers {
   openEntry: (entry: FileEntry) => void;
   navigate: (path: string) => void;
   openInEditor: (relativePath: string) => void;
+  /** 仅激活文档库，保持默认定位到第一项 */
+  noop: () => void;
 }
 
 const SMART_COLLECTIONS = [
@@ -128,6 +130,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
 function LibrarySection({
   lib,
   flat,
+  revealPath,
   active,
   expanded,
   contentVersion,
@@ -144,6 +147,8 @@ function LibrarySection({
   lib: LibraryMeta;
   /** 单库选择器模式：不画库名行，目录树始终展开 */
   flat?: boolean;
+  /** 需要在目录树里展开的目录（默认定位到第一项时使用） */
+  revealPath?: string | null;
   active: boolean;
   expanded: boolean;
   contentVersion: number;
@@ -207,6 +212,13 @@ function LibrarySection({
     },
     [load],
   );
+
+  // 默认定位：展开指定目录（并加载其子项），使左侧树与中央列表结构不同、直接落在第一项上
+  useEffect(() => {
+    if (!revealPath || cacheRef.current.has(revealPath)) return;
+    setDirExpanded((prev) => new Set(prev).add(revealPath));
+    void load(revealPath).then((entries) => setCache((prev) => new Map(prev).set(revealPath, entries)));
+  }, [revealPath, load]);
 
   const ctx: TreeCtx = {
     expanded: dirExpanded,
@@ -294,6 +306,9 @@ export default function LibraryView() {
   const [importing, setImporting] = useState(false);
   const [layout, setLayout] = useState(getLibraryLayout());
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** 刚打开 / 切换到库、尚未有任何用户操作：根目录加载后默认定位到第一项 */
+  const autoPickRef = useRef(false);
+  const [revealPath, setRevealPath] = useState<string | null>(null);
   useEffect(() => {
     const f = () => setLayout(getLibraryLayout());
     window.addEventListener("markflow:prefs-changed", f);
@@ -354,6 +369,8 @@ export default function LibraryView() {
     setCurrentDir("");
     setSelected(null);
     setList([]);
+    setRevealPath(null);
+    autoPickRef.current = true;
   }, [libraryId]);
 
   // 在非活动库的目录树里操作时：先激活该库，待其渲染完成后再执行（此时 current / 各回调都已是新库的）
@@ -390,6 +407,7 @@ export default function LibraryView() {
       .getFileDetail(current.id, focusFile.relativePath)
       .then((detail) => {
         if (!cancelled) {
+          autoPickRef.current = false;
           setCurrentDir(detail.parentPath);
           setSelected(detail);
         }
@@ -405,7 +423,19 @@ export default function LibraryView() {
     if (!current) return;
     let cancelled = false;
     void loadDir(current.id, currentDir).then((entries) => {
-      if (!cancelled) setList(entries);
+      if (cancelled) return;
+      setList(entries);
+      // 默认定位：目录优先、按名称排序的第一项（目录 → 进入并在树中展开；文件 → 选中并显示详情）
+      if (autoPickRef.current && currentDir === "" && entries.length > 0) {
+        autoPickRef.current = false;
+        const byName = (a: FileEntry, b: FileEntry) => a.name.localeCompare(b.name, "zh-Hans-CN");
+        const first = [...entries.filter((e) => e.isDir).sort(byName), ...entries.filter((e) => !e.isDir).sort(byName)][0];
+        setSelected(first);
+        if (first.isDir) {
+          setCurrentDir(first.relativePath);
+          setRevealPath(first.relativePath);
+        }
+      }
     });
     return () => {
       cancelled = true;
@@ -413,16 +443,18 @@ export default function LibraryView() {
   }, [current, currentDir, contentVersion, loadDir]);
 
   function navigate(path: string) {
+    autoPickRef.current = false;
     setCurrentDir(path);
     setSelected(null);
   }
 
   function handleSelect(entry: FileEntry) {
+    autoPickRef.current = false;
     setSelected(entry);
     if (entry.isDir) setCurrentDir(entry.relativePath);
   }
 
-  handlersRef.current = { handleSelect, openEntry, navigate, openInEditor };
+  handlersRef.current = { handleSelect, openEntry, navigate, openInEditor, noop: () => {} };
 
   /** 统一打开路由：目录进入；PDF/Office/图片进查看器；文本类进编辑器 */
   function openEntry(entry: FileEntry) {
@@ -624,7 +656,7 @@ export default function LibraryView() {
                         type="button"
                         onClick={() => {
                           setPickerOpen(false);
-                          if (lib.id !== current?.id) inLibrary(lib, (h) => h.navigate(""));
+                          if (lib.id !== current?.id) inLibrary(lib, (h) => h.noop());
                         }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50"
                       >
@@ -650,6 +682,7 @@ export default function LibraryView() {
                   key={selectorLib.id}
                   lib={selectorLib}
                   flat
+                  revealPath={revealPath}
                   active
                   expanded
                   contentVersion={contentVersion}
@@ -713,12 +746,13 @@ export default function LibraryView() {
             <LibrarySection
               key={lib.id}
               lib={lib}
+              revealPath={current?.id === lib.id ? revealPath : null}
               active={current?.id === lib.id}
               expanded={expandedLibs.has(lib.id)}
               contentVersion={contentVersion}
               selectedPath={current?.id === lib.id ? (selected?.relativePath ?? null) : null}
               onToggle={() => toggleLibExpanded(lib.id)}
-              onActivate={() => inLibrary(lib, (h) => h.navigate(""))}
+              onActivate={() => inLibrary(lib, (h) => (current?.id === lib.id ? h.navigate("") : h.noop()))}
               onClose={() => void closeLibraryInWorkspace(lib.id)}
               onNewFile={() => openNewFile("", lib)}
               onNewFolder={() => openNewFolder("", lib)}
