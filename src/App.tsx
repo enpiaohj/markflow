@@ -9,6 +9,7 @@ import ImagePreviewPane from "./components/ImagePreviewPane";
 import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
+import { ZoomProvider } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
 import DeliveryView from "./views/DeliveryView";
 import HomeView from "./views/HomeView";
@@ -97,10 +98,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <LibraryProvider>
-      <TasksProvider>
-        <Shell />
-      </TasksProvider>
-    </LibraryProvider>
+    <ZoomProvider>
+      <LibraryProvider>
+        <TasksProvider>
+          <Shell />
+        </TasksProvider>
+      </LibraryProvider>
+    </ZoomProvider>
   );
 }

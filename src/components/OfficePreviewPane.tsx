@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { ConversionPrecheck } from "../lib/types";
 import { useLibrary } from "./LibraryContext";
+import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import type { OfficePreview } from "../lib/types";
 
@@ -21,6 +22,7 @@ import type { OfficePreview } from "../lib/types";
  */
 export default function OfficePreviewPane() {
   const { current, viewerFile, closeViewer, openInViewer, openInEditor } = useLibrary();
+  const { config: zoomConfig, configure: configureZoom } = useZoom();
   const [preview, setPreview] = useState<OfficePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -36,7 +38,9 @@ export default function OfficePreviewPane() {
     void api.listComponents().then((list) => {
       setHasLibreOffice(list.find((c) => c.name === "libreoffice")?.found ?? false);
     });
-  }, []);
+    configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1 });
+    return () => configureZoom({ visible: false });
+  }, [configureZoom]);
 
   useEffect(() => {
     if (!current || !viewerFile || viewerFile.kind !== "office") return;
@@ -228,7 +232,7 @@ export default function OfficePreviewPane() {
       )}
 
       {/* 内容 */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto" style={{ zoom: zoomConfig.value }}>
         {loading ? (
           <div className="flex h-full flex-col items-center justify-center text-gray-400">
             <Loader2 className="h-6 w-6 animate-spin" />

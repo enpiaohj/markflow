@@ -43,6 +43,7 @@ import AiPanel from "./AiPanel";
 import AnnotationsPanel from "./AnnotationsPanel";
 import DiffDialog from "./DiffDialog";
 import { useLibrary } from "./LibraryContext";
+import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import type { CheckIssue } from "../lib/types";
 import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
@@ -65,6 +66,7 @@ function VisualEditor({
   onPolish: () => void;
   registerSelection: (fn: () => string) => void;
 }) {
+  const { config: zoomConfig } = useZoom();
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -151,7 +153,10 @@ function VisualEditor({
 
       {/* 分页文档画布 */}
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100/70 px-6 py-8">
-        <div className="mx-auto min-h-[60vh] w-full max-w-[820px] rounded-lg bg-white px-14 py-12 shadow-sm ring-1 ring-gray-200/60">
+        <div
+          className="mx-auto min-h-[60vh] w-full max-w-[820px] rounded-lg bg-white px-14 py-12 shadow-sm ring-1 ring-gray-200/60"
+          style={{ zoom: zoomConfig.value }}
+        >
           <EditorContent editor={editor} />
         </div>
       </div>
@@ -187,6 +192,7 @@ function SourceEditor({
   onChange: (text: string) => void;
   registerSelection: (fn: () => string) => void;
 }) {
+  const { config: zoomConfig } = useZoom();
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -210,7 +216,13 @@ function SourceEditor({
     // initial 仅在挂载时使用；编辑中的变化通过 onChange 上抛，切换编辑器由 key 重建完成
   }, []);
 
-  return <div ref={hostRef} className="h-full overflow-hidden bg-white" />;
+  return (
+    <div
+      ref={hostRef}
+      className="h-full overflow-hidden bg-white"
+      style={{ zoom: zoomConfig.value }}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +231,7 @@ function SourceEditor({
 
 export default function EditorPane() {
   const { current, openFile, closeFile } = useLibrary();
+  const { configure: configureZoom } = useZoom();
   const [entry, setEntry] = useState<FileEntry | null>(null);
   const [savedText, setSavedText] = useState("");
   const [baseMtime, setBaseMtime] = useState(0);
@@ -246,6 +259,11 @@ export default function EditorPane() {
   }, [openFile]);
 
   const rel = openFile?.relativePath ?? "";
+
+  useEffect(() => {
+    configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1 });
+    return () => configureZoom({ visible: false });
+  }, [configureZoom, openFile]);
 
   // 打开文件 → 读取内容与基线
   useEffect(() => {

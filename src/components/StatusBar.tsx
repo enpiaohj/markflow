@@ -1,6 +1,8 @@
+import { Minus, Plus } from "lucide-react";
 import { AlertCircle, CheckCircle2, ListTodo, Loader2 } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
 import { useTasks } from "./TasksContext";
+import { useZoom } from "./ZoomContext";
 
 /**
  * 底部状态栏：当前库、索引进度、后台任务与本地优先提示（对应概念图主界面底部）。
@@ -8,6 +10,7 @@ import { useTasks } from "./TasksContext";
 export default function StatusBar() {
   const { current, scanStatus, requestTasksView } = useLibrary();
   const { runningCount } = useTasks();
+  const { config, zoomIn, zoomOut, setValue, reset } = useZoom();
 
   let scanNode: React.ReactNode;
   if (!current) {
@@ -54,6 +57,44 @@ export default function StatusBar() {
           </button>
         )}
         <span>v0.2.0</span>
+        {config.visible && (
+          <span className="flex items-center gap-1.5" title="缩放（点击百分比复位 100%）">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={config.value <= config.min}
+              aria-label="缩小"
+              className="flex h-4 w-4 items-center justify-center rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30"
+            >
+              <Minus className="h-3 w-3" />
+            </button>
+            <input
+              type="range"
+              min={config.min * 100}
+              max={config.max * 100}
+              step={config.step * 100}
+              value={Math.round(config.value * 100)}
+              onChange={(e) => setValue(Number(e.target.value) / 100)}
+              className="h-1 w-24 cursor-pointer accent-primary-600"
+            />
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={config.value >= config.max}
+              aria-label="放大"
+              className="flex h-4 w-4 items-center justify-center rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="w-10 text-right tabular-nums text-gray-600 hover:text-primary-600"
+            >
+              {Math.round(config.value * 100)}%
+            </button>
+          </span>
+        )}
       </div>
     </footer>
   );

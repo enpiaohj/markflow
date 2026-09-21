@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ExternalLink, Loader2, ScanText, TriangleAlert } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
+import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import { formatSize } from "../lib/format";
 
 /** 图片查看器 + Windows OCR 文字识别（§8.10，识别文本入全文索引） */
 export default function ImagePreviewPane() {
   const { current, viewerFile, closeViewer } = useLibrary();
+  const { config: zoomConfig, configure: configureZoom } = useZoom();
   const [url, setUrl] = useState("");
   const [size, setSize] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -20,6 +22,7 @@ export default function ImagePreviewPane() {
   useEffect(() => {
     if (!current || !viewerFile || viewerFile.kind !== "image") return;
     let objectUrl = "";
+    configureZoom({ visible: true, min: 0.25, max: 5, step: 0.25, value: 1 });
     setLoading(true);
     setError("");
     setOcrText(null);
@@ -35,6 +38,7 @@ export default function ImagePreviewPane() {
       .finally(() => setLoading(false));
     return () => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      configureZoom({ visible: false });
     };
   }, [current, viewerFile]);
 
@@ -105,7 +109,12 @@ export default function ImagePreviewPane() {
           ) : error ? (
             <p className="max-w-md break-all text-center text-sm text-gray-500">{error}</p>
           ) : (
-            <img src={url} alt={rel} className="max-h-full max-w-full rounded-lg bg-white object-contain shadow-md ring-1 ring-gray-300/60" />
+            <img
+              src={url}
+              alt={rel}
+              style={{ zoom: zoomConfig.value }}
+              className="max-h-full max-w-full rounded-lg bg-white object-contain shadow-md ring-1 ring-gray-300/60"
+            />
           )}
         </div>
 
