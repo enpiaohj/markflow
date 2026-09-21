@@ -1,0 +1,56 @@
+[package]
+name = "markflow"
+version = "0.3.1"
+description = "MarkFlow - 多格式本地文档库桌面应用"
+authors = ["MarkFlow"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "markflow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+notify = "7"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+keyring = { version = "3", features = ["windows-native"] }
+regex = "1"
+futures-util = "0.3"
+sha2 = "0.10"
+windows = { version = "0.61", default-features = false, features = ["Media_Ocr", "Storage_Streams", "Graphics_Imaging", "Globalization", "Foundation"] }
+windows-core = "0.61"
+trash = "5"
+
+[dev-dependencies]
+tempfile = "3"
+
+# 性能 Spike 专用 profile：接近 release 的优化但编译更快（cargo test --profile spike）
+[profile.spike]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
