@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-21
 
 ### Added
 
@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     渲染失败自动回退到文本预览并说明原因；旧版 .doc / .xls / .ppt 与加密文件给出明确提示。
   - 环境变量 `MARKFLOW_NO_OFFICE=1` 可禁用 Office / LibreOffice 版式引擎（用于测试或排查外部引擎问题）。
 - Word / PowerPoint 工具栏新增「纯文本 / 文档视图」「文本大纲 / 幻灯片」切换。
+- **设置项「Word / PowerPoint 预览引擎」**：默认「自动（有 Office 优先）」；选择「始终使用内置渲染」后，
+  即使装了 Microsoft Office / LibreOffice 也不启动它们（同时停止选中文件时的后台预热），打开更快、不依赖外部软件；
+  工具栏的「版式预览」按钮仍可随时手动调用 Office 导出精确版式。Excel 始终使用原生表格。
 
 ### Changed
 
