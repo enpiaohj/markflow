@@ -75,7 +75,7 @@
 
 ## 当前版本与路线图
 
-**当前版本：v0.3.0**（详见 [CHANGELOG](CHANGELOG.md)）
+**当前版本：v0.3.1**（详见 [CHANGELOG](CHANGELOG.md)）
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
