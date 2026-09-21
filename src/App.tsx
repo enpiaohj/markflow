@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+import * as api from "./lib/api";
 import { Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
@@ -56,6 +58,16 @@ function Shell() {
   useEffect(() => {
     const win = getCurrentWindow();
     const un = win.onCloseRequested(async (event) => {
+      // 开启「关闭时最小化到通知区域」：后端只隐藏窗口，编辑内容仍在内存中，无需「放弃修改」确认
+      try {
+        if ((await api.getShellPrefs()).closeToTray) {
+          // 必须 preventDefault：否则前端库在处理完关闭事件后会主动销毁窗口，把后端刚隐藏的窗口关掉
+          event.preventDefault();
+          return;
+        }
+      } catch {
+        /* 读取失败按普通关闭处理 */
+      }
       if (!dirtyRef.current) return;
       event.preventDefault();
       const ok = await dialog.confirm({
@@ -69,8 +81,22 @@ function Shell() {
         await win.destroy();
       }
     });
+    // 通知区域菜单「退出」：真正退出前先确认未保存修改
+    const unQuit = listen("request-quit", async () => {
+      if (dirtyRef.current) {
+        const ok = await dialog.confirm({
+          title: "退出 MarkFlow？",
+          message: "当前文档有未保存的修改，退出将丢失这些修改。\n（下次打开同一文件时可从恢复草稿找回最近的编辑内容。）",
+          confirmText: "仍然退出",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+      await api.quitApp();
+    });
     return () => {
       void un.then((f) => f());
+      void unQuit.then((f) => f());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

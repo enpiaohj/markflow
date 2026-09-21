@@ -29,6 +29,24 @@ import type {
   VersionInfo,
 } from "./types";
 
+/** 外壳偏好：关闭时最小化到通知区域、开机启动（以注册表为准） */
+export function getShellPrefs(): Promise<{ closeToTray: boolean; autostart: boolean }> {
+  return invoke("get_shell_prefs");
+}
+
+export function setCloseToTray(enabled: boolean): Promise<void> {
+  return invoke("set_close_to_tray", { enabled });
+}
+
+export function setAutostart(enabled: boolean): Promise<void> {
+  return invoke("set_autostart", { enabled });
+}
+
+/** 真正退出应用（调用前需已完成未保存修改的确认） */
+export function quitApp(): Promise<void> {
+  return invoke("quit_app");
+}
+
 /** 打开任意文件：定位所属文档库，或进入单文件模式 */
 export function openFilePath(path: string): Promise<OpenTarget> {
   return invoke("open_file_path", { path });

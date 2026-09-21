@@ -57,6 +57,7 @@ export default function MenuBar() {
     viewerFile,
     deliveryOpen,
     closeDocument,
+    confirmDiscard,
   } = useLibrary();
   const dialog = useDialog();
   const { config: zoom, zoomIn, zoomOut, reset } = useZoom();
@@ -184,7 +185,8 @@ export default function MenuBar() {
         { label: "关闭文档", shortcut: "Ctrl+W", onClick: () => void closeDocument(), disabled: !openFile && !viewerFile && !deliveryOpen },
         { label: "关闭当前文档库", onClick: closeCurrentLibrary, disabled: !current },
         { separator: true },
-        { label: "退出", shortcut: "Alt+F4", onClick: () => void getCurrentWindow().close() },
+        // 「退出」是真正退出（开启「关闭时最小化到通知区域」后，窗口的关闭按钮只会隐藏窗口）
+        { label: "退出", shortcut: "Alt+F4", onClick: () => void confirmDiscard().then(async (ok) => { if (ok) await api.quitApp(); }) },
       ],
     },
     {

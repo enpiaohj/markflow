@@ -14,6 +14,7 @@ mod officepdf;
 mod openfile;
 mod pptxslides;
 mod selfwrite;
+mod shell;
 mod sensitive;
 mod tasks;
 mod textenc;
@@ -58,6 +59,41 @@ fn stat_file_mtime(
 ) -> Result<i64, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     Ok(library::file_mtime(&std::path::Path::new(&root).join(relative_path)))
+}
+
+/// 外壳偏好：关闭时最小化到通知区域、开机启动（以注册表为准）。
+#[tauri::command]
+fn get_shell_prefs(shell: State<'_, shell::ShellState>) -> serde_json::Value {
+    serde_json::json!({
+        "closeToTray": shell.close_to_tray(),
+        "autostart": shell::autostart_enabled(),
+    })
+}
+
+/// 开关「关闭窗口时最小化到通知区域」：即时创建 / 移除通知区域图标并持久化。
+#[tauri::command]
+fn set_close_to_tray(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    shell: State<'_, shell::ShellState>,
+    enabled: bool,
+) -> Result<(), String> {
+    shell::ensure_tray(&app, enabled)?;
+    shell::write_close_to_tray(&state.0.lock().unwrap(), enabled)?;
+    shell.close_to_tray.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+/// 开关开机启动。
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    shell::set_autostart(enabled)
+}
+
+/// 真正退出应用（前端已完成未保存修改的确认）。
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 /// 返回应用基础信息，供前端关于信息使用。
@@ -1106,6 +1142,22 @@ fn restore_file_version(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            // 开启「关闭时最小化到通知区域」：关闭只隐藏窗口，应用继续在后台运行
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let close_to_tray = window
+                        .app_handle()
+                        .try_state::<shell::ShellState>()
+                        .map(|s| s.close_to_tray())
+                        .unwrap_or(false);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
+        })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // 二次启动（如双击 .md 文件）：把路径交给已运行的实例并聚焦窗口
             let paths = openfile::paths_from_args(args.into_iter().skip(1));
@@ -1115,10 +1167,7 @@ pub fn run() {
                 }
                 let _ = app.emit("open-paths", paths);
             }
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.unminimize();
-                let _ = win.set_focus();
-            }
+            shell::show_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1127,6 +1176,22 @@ pub fn run() {
             app.manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(conn))));
             app.manage(WatchState(std::sync::Mutex::new(None)));
             app.manage(tasks::TaskManager::default());
+            // 外壳偏好：读取「关闭时最小化到通知区域」，需要时创建通知区域图标；
+            // 开机自动拉起（--autostart）时按偏好隐藏到通知区域或最小化
+            let close_to_tray = shell::read_close_to_tray(&app.state::<AppState>().0.lock().unwrap());
+            app.manage(shell::ShellState::new(close_to_tray));
+            if close_to_tray {
+                let _ = shell::ensure_tray(app.handle(), true);
+            }
+            if std::env::args().any(|a| a == shell::AUTOSTART_ARG) {
+                if let Some(w) = app.get_webview_window("main") {
+                    if close_to_tray {
+                        let _ = w.hide();
+                    } else {
+                        let _ = w.minimize();
+                    }
+                }
+            }
             app.manage(openfile::PendingOpen(std::sync::Mutex::new(openfile::paths_from_args(
                 std::env::args().skip(1),
             ))));
@@ -1134,6 +1199,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            get_shell_prefs,
+            set_close_to_tray,
+            set_autostart,
+            quit_app,
             open_file_path,
             take_pending_open_paths,
             list_recent_files,
