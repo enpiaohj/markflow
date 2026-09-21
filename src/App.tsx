@@ -7,6 +7,7 @@ import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import CreateLibraryWizard from "./components/CreateLibraryWizard";
+import LibraryManager from "./components/LibraryManager";
 import EditorPane from "./components/EditorPane";
 import ImagePreviewPane from "./components/ImagePreviewPane";
 import PdfViewer from "./components/PdfViewer";
@@ -165,6 +166,7 @@ function Shell() {
       </div>
       <StatusBar />
       <CreateLibraryWizard />
+      <LibraryManager />
     </div>
   );
 }

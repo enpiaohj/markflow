@@ -55,6 +55,7 @@ export default function MenuBar() {
     requestView,
     requestSearchView,
     closeCurrentLibrary,
+    openManager,
     viewerFile,
     deliveryOpen,
     closeDocument,
@@ -197,7 +198,8 @@ export default function MenuBar() {
         { separator: true },
         { label: "保存", shortcut: "Ctrl+S", onClick: save, disabled: !openFile },
         { label: "关闭文档", shortcut: "Ctrl+W", onClick: () => void closeDocument(), disabled: !openFile && !viewerFile && !deliveryOpen },
-        { label: "关闭当前文档库", onClick: closeCurrentLibrary, disabled: !current },
+        { label: "关闭当前文档库（保留在列表）", onClick: closeCurrentLibrary, disabled: !current },
+        { label: "管理文档库…", onClick: openManager },
         { separator: true },
         // 「退出」是真正退出（开启「关闭时最小化到通知区域」后，窗口的关闭按钮只会隐藏窗口）
         { label: "退出", shortcut: "Alt+F4", onClick: () => void confirmDiscard().then(async (ok) => { if (ok) await api.quitApp(); }) },

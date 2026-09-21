@@ -64,6 +64,10 @@ interface LibraryContextValue {
   scanStatus: ScanStatus;
   /** 建库向导是否打开 */
   wizardOpen: boolean;
+  /** 「管理文档库」对话框是否打开 */
+  managerOpen: boolean;
+  openManager: () => void;
+  closeManager: () => void;
   /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
   viewRequest: { target: ViewRequestTarget; nonce: number };
   /** 打开的文档标签页（按打开顺序）与当前激活的标签（null = 显示主视图） */
@@ -181,6 +185,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [expandedLibs, setExpandedLibs] = useState<Set<string>>(() => new Set(readIds(LS_EXPANDED)));
   const [scanStatus, setScanStatus] = useState<ScanStatus>(IDLE_SCAN);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [viewRequest, setViewRequest] = useState(INITIAL_VIEW);
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
@@ -652,6 +657,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       closeLibraryInWorkspace,
       scanStatus,
       wizardOpen,
+      managerOpen,
+      openManager: () => setManagerOpen(true),
+      closeManager: () => setManagerOpen(false),
       viewRequest,
       contentVersion,
       focusFile,
@@ -698,7 +706,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       closeDelivery: () => setActiveTabId(null),
     }),
-    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, tabs, activeTabId, activeTab, dirtyTabs, closeTab, closeTabsForPath, upsertTab, requestSearchView, requestView, requestTasksView, switchToLibrary, activateLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
+    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, managerOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, tabs, activeTabId, activeTab, dirtyTabs, closeTab, closeTabsForPath, upsertTab, requestSearchView, requestView, requestTasksView, switchToLibrary, activateLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
   );
 
   return (

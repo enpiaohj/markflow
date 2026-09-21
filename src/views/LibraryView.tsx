@@ -301,7 +301,7 @@ function LibrarySection({
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { libraries, requestView, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
+  const { libraries, openManager, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [layout, setLayout] = useState(getLibraryLayout());
@@ -706,7 +706,7 @@ export default function LibraryView() {
                 <Plus className="h-3.5 w-3.5" />
                 添加文档库
               </button>
-              <button type="button" onClick={() => requestView("home")}
+              <button type="button" onClick={openManager}
                 className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-gray-600 hover:bg-gray-100">
                 <FolderOpen className="h-3.5 w-3.5" />
                 管理文档库

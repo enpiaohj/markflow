@@ -274,7 +274,12 @@ pub fn create_library(
         "portableMeta": req.portable_meta,
     });
     let now = now_ms();
-    let id = Uuid::new_v4().to_string();
+    let reuse_key = format!("removed_library:{}", req.root_path);
+    let reused: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [&reuse_key], |r| r.get(0))
+        .ok();
+    let id = reused.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [&reuse_key]);
     conn.execute(
         "INSERT INTO libraries (id, root_path, name, file_count, created_at, last_opened_at, settings_json)
          VALUES (?1, ?2, ?3, 0, ?4, ?4, ?5)",
@@ -301,6 +306,14 @@ pub fn open_library(conn: &Connection, id: &str) -> Result<LibraryMeta, String> 
 
 /// 仅从 MarkFlow 移除索引记录，绝不删除磁盘上的原文件。
 pub fn remove_library(conn: &Connection, id: &str) -> Result<(), String> {
+    // 索引可重建，但历史版本 / 批注 / 交付记录按 library_id 存放：记住「文件夹 → 库 ID」，
+    // 之后重新添加同一文件夹时沿用旧 ID，这些数据即可恢复
+    if let Ok(root) = conn.query_row("SELECT root_path FROM libraries WHERE id = ?1", [id], |r| r.get::<_, String>(0)) {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![format!("removed_library:{root}"), id],
+        );
+    }
     conn.execute(
         "DELETE FROM search_fts WHERE file_id IN (SELECT id FROM files WHERE library_id = ?1)",
         [id],
@@ -998,6 +1011,32 @@ mod tests {
         std::fs::create_dir_all(root.join(".hidden")).unwrap();
         std::fs::write(root.join(".hidden").join("隐藏.log"), "x").unwrap();
         (dir, root)
+    }
+
+    #[test]
+    fn removed_library_readded_keeps_id() {
+        let conn = memory_db();
+        let (_dir, root) = make_temp_library();
+        let req = |name: &str| CreateLibraryRequest {
+            root_path: root.to_string_lossy().to_string(),
+            name: Some(name.into()),
+            exclude_dirs: vec![],
+            full_text_index: true,
+            ocr_enabled: false,
+            portable_meta: false,
+        };
+        let first = create_library(&conn, req("库A")).unwrap();
+        // 库名唯一（不区分大小写）
+        let other = tempfile::tempdir().unwrap();
+        let dup = create_library(
+            &conn,
+            CreateLibraryRequest { root_path: other.path().to_string_lossy().to_string(), ..req("库a") },
+        );
+        assert!(dup.is_err());
+        remove_library(&conn, &first.id).unwrap();
+        // 重新添加同一文件夹：沿用旧 ID，历史版本 / 批注按 library_id 关联可恢复
+        let again = create_library(&conn, req("库A")).unwrap();
+        assert_eq!(again.id, first.id);
     }
 
     #[test]
