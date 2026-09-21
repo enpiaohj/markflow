@@ -56,7 +56,7 @@ export default function StatusBar() {
             {runningCount} 个任务运行中
           </button>
         )}
-        <span>v0.2.0</span>
+        <span>v0.3.0</span>
         {config.visible && (
           <span className="flex items-center gap-1.5" title="缩放（点击百分比复位 100%）">
             <button

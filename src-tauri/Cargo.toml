@@ -1,6 +1,6 @@
 [package]
 name = "markflow"
-version = "0.2.0"
+version = "0.3.0"
 description = "MarkFlow - 多格式本地文档库桌面应用"
 authors = ["MarkFlow"]
 edition = "2021"
