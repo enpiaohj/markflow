@@ -1,106 +1,198 @@
 # MarkFlow
 
+<p align="center">
+  <img src="public/markflow.svg" alt="MarkFlow" width="72" />
+</p>
+
 面向项目与企业文档的**多格式本地文档库、专业写作、AI 协作和正式交付工作台**。
-以普通本地文件夹为基础，统一管理 Markdown、Word、PDF、Excel、PPT、图片、代码等格式，
-提供跨格式搜索、文档关联、AI 分析、审阅与正式交付能力。文件始终保存在原位置，本地优先、无需登录。
 
-## 核心功能（规划）
+以普通本地文件夹为基础，统一管理 Markdown、Word、PDF、Excel、PPT、图片、代码、配置等格式，
+提供跨格式全文搜索、专业编辑、AI 分析、批注审阅与正式交付能力。
 
-- **多格式文档库**：目录树、文件列表、智能集合；格式能力分级（原生编辑 / 转换编辑 / 深度阅读 / 快速预览 / 外部打开）。
-- **专业原生编辑**：Markdown 可视化分页画布（Tiptap/ProseMirror）+ 源码模式（CodeMirror 6）。
-- **统一搜索**：文件名、正文、PDF 文本层、Office 文本、OCR 与转写文本的本地统一索引（SQLite FTS5）。
-- **跨文档关联**：链接、手动关联与自动建议，关系图视图，文件移动后按稳定 ID 恢复。
-- **AI 协作**：上下文门禁、敏感信息扫描、带引用问答、差异审阅后应用。
-- **正式交付**：模板、预检、验证、历史，DOCX / PDF / HTML / Markdown / ZIP 可验证导出。
+**三条底线**：文件永远保存在原位置（不移动、不复制、不修改）；所有处理在本地完成（无需登录、不上传云端）；AI 不越权（上下文需确认、敏感信息先扫描、修改先审阅）。
 
-完整产品设计见《[产品设计与技术实施方案 v2.0](docs/产品设计/2026-09-20-MarkFlow-多格式本地文档库产品设计与技术实施方案-v2.0.md)》与 [UI 概念设计图](docs/产品设计/UI概念设计图/)。
+---
 
-## 当前版本
+## 功能特性
 
-v0.3.0（在 v0.2.0 基础上新增文档视图缩放与目录树文件操作：新建 / 重命名 / 移动 / 删除进回收站）。
+### 📁 多格式文档库
 
-已实现：Tauri 2 + React 19 + TypeScript + Vite + Tailwind CSS 4 工程骨架；
-无边框窗口、自定义标题栏（含文档库切换）、活动栏导航、状态栏；
-**建库向导**（三步：选择文件夹 → 索引设置 → 确认创建）、
-**文档库三栏视图**（目录树懒加载、文件列表排序、详情面板）、
-**目录扫描与 SQLite 索引**（默认/自定义排除规则、后台扫描进度）、
-**文件监听**（外部修改防抖重扫、自动刷新）、
-**全文检索**（文本类格式正文提取 + FTS5 trigram，支持中文子串匹配）、
-**搜索视图**（命中片段高亮、结果定位跳转、Ctrl+K）、
-**后台任务中心**（扫描进度、取消、失败原因、历史）、
-**原生编辑**（Markdown 可视化画布 + 源码模式、文本/代码/JSON/YAML 编辑、
-Ctrl+S 原子保存、外部冲突检测、历史快照与一键恢复）、
-**PDF 阅读**（PDF.js 渲染、翻页缩放、全文搜索）、
-**Office 快速预览**（DOCX/XLSX/PPTX 安全提取，正文可检索，系统应用打开）、
-**转换与导入**（Pandoc：DOCX→可编辑 Markdown 副本、DOCX/HTML 导入；
-可选 LibreOffice 高保真预览；组件健康状态）、
-**AI 工作台**（OpenAI 兼容 Provider、密钥入凭据库、上下文门禁与敏感扫描、
-流式引用问答、AI 润色差异审阅、文档质量检查）、
-**正式交付中心**（质量门禁预检、来源 SHA-256 冻结、MD/HTML/DOCX/PDF/ZIP
-多格式管线、原子落盘、交付历史）、
-**图片 OCR 与批注**（Windows OCR 文字识别入索引、选中文本批注与重定位检测）。
-详见 [CHANGELOG](CHANGELOG.md)。
+- **建库向导**：三步完成——选择本地文件夹 → 索引设置（全文索引 / 图片 OCR / 便携元数据 / 排除规则）→ 确认创建；第一步即预览文件数量与总大小。
+- **格式注册表**：Markdown、文本、代码、JSON、YAML、XML、配置、CSV、Word、Excel、PowerPoint、PDF、图片、压缩包、音视频等 17 类格式识别与图标区分；未知格式自动归入「其他」，不阻断使用。
+- **目录树**：懒加载展开、右键菜单（新建 / 重命名 / 移动 / 删除）、面包屑导航、可排序文件列表、右侧详情面板。
+- **扫描与索引**：默认排除（.git、node_modules、target 等）+ 自定义排除规则；隐藏项跳过；20 万条目上限保护；后台线程扫描，进度实时可见。
+- **文件监听**：外部程序修改文件后自动防抖重扫（1.2 秒静默窗口），界面与搜索结果自动更新；文件被占用时跳过并计数，不中断。
+
+### 🔍 全文检索
+
+- 文件名 + 正文统一检索（Markdown、文本、代码、JSON、YAML、XML、配置、CSV；Office 正文已接入）。
+- FTS5 trigram 分词，**支持中文子串匹配**；≥3 字符走全文索引，短词自动回退文件名匹配。
+- 命中片段高亮（【】标注）、「文件名 / 正文」命中来源标记；点击结果跳转文档库定位并选中。
+- 快捷键 `Ctrl + K` 或点击标题栏搜索框。
+
+### ✍️ 原生编辑
+
+- **Markdown 可视化模式**：Word 式分页画布（Tiptap / ProseMirror），标题、列表、任务列表、表格、引用、代码块、图片；Markdown 文件本身是唯一真源。
+- **源码模式**（CodeMirror 6）：Markdown / JSON / YAML 语法高亮；两种模式随时互切。
+- **保存闭环**：`Ctrl + S` 保存；临时文件 + fsync + 原子替换；保存前自动快照（每文件保留 20 个版本，可随时恢复）。
+- **外部冲突检测**：文件被其他程序修改后保存会弹出三选一（覆盖保存 / 重新载入 / 取消）。
+- 文本 / 代码 / JSON / YAML / XML / 配置 / CSV 均可直接编辑。
+
+### 📄 PDF 与 Office
+
+- **PDF 阅读**（PDF.js）：翻页、缩放（40%–400%）、跨页文本搜索（命中页码点击定位）。
+- **Office 快速预览**：DOCX 段落流 / XLSX 工作表网格 / PPTX 幻灯片大纲；OOXML 纯解析（不执行宏、不改源文件）；正文进入全文索引。
+- **系统应用打开**：一键调用 Word / Excel / WPS 编辑原件，保存后由文件监听自动同步。
+- **转换**：DOCX → Markdown 可编辑副本（Pandoc，转换前预检加密 / 宏 / 修订 / 批注）；DOCX / HTML 导入转 Markdown。
+- 可选 LibreOffice 组件提供高保真版式预览（未安装时自动降级）。
+
+### 🤖 AI 工作台
+
+- **OpenAI 兼容 Provider**：DeepSeek、通义、OpenAI 等均可接入；**API Key 存 Windows 凭据库**，不落库、不回传前端。
+- **连通性测试**：区分网络错误 / 认证失败 / 地址不存在 / 服务端问题。
+- **上下文门禁**：发送前展示所选文件范围、字符数与 Token 估算、敏感信息扫描结果（9 类规则：API Key、JWT、私钥、连接串、手机号、身份证等，脱敏展示）；命中需知情放行。
+- **流式引用问答**：回答以【来源 n】标注引用，一键保存为新文档。
+- **AI 润色**：整篇润色后进入**行级差异审阅**，逐块确认后应用；应用走保存闭环自动快照。
+
+### 🖼️ OCR 与批注
+
+- **图片 OCR**（Windows OCR 系统能力）：一键识别图片文字，结果进入全文索引——截图里的文字也能搜到。
+- **批注**：引用编辑器选中文本添加意见；支持解决 / 重开 / 删除；原文变化后引用无法定位时标注「位置已变」，不静默丢失。
+
+### ✅ 质量检查与正式交付
+
+- **质量检查**：标题层级跳跃、断链、空章节、敏感信息；分错误 / 警告 / 建议三级，错误可阻止交付。
+- **正式交付中心**（五步）：来源选择 → 交付格式（Markdown / HTML / DOCX / PDF / ZIP）→ 目标目录与预检 → 开始交付 → 交付历史。
+- **交付门禁**：预检服务端强制执行，错误项直接阻止交付。
+- **来源冻结**：交付前对全部来源计算 SHA-256，交付清单记录冻结哈希与知情放行的预检提示。
+- **可靠落盘**：临时目录生成 → 产物验证（存在 / 非空 / DOCX 有效性）→ 同卷原子改名；失败自动清理。
+
+### 🧰 后台任务中心
+
+索引、重扫、转换、导入、交付任务统一管理：实时进度、取消、完成摘要、失败原因与重试入口；状态栏显示运行中任务数。
+
+---
+
+## 当前版本与路线图
+
+**当前版本：v0.3.0**（详见 [CHANGELOG](CHANGELOG.md)）
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| v0.1 文档库基础 | 建库 / 浏览 / 索引 / 监听 | ✅ |
+| v0.2 原生编辑与搜索 | 编辑闭环 / 全文检索 | ✅ |
+| v0.3 PDF/Office 与转换 | 阅读器 / 快速预览 / Pandoc 转换 | ✅ |
+| v0.4 AI 与审阅 | AI 工作台 / OCR / 批注 / 质量检查 | ✅（OCR 置信度随 SDK 缺失） |
+| v0.5 正式交付 | 交付中心 / 门禁 / 历史 | ✅ |
+
+后续规划：扫描版 PDF 页面级 OCR、PDF 批注、Markdown 链接自动改写、代码签名与自动更新、文档关系图、团队协作。
 
 ## 系统要求
 
-- Windows 10/11 x64（首发平台）
-- WebView 2 Runtime（Windows 11 内置）
-- 开发环境：Node.js ≥ 20、Rust stable（MSVC 工具链）、Visual Studio Build Tools（C++ 工作负载）
+- **运行**：Windows 10/11 x64；WebView2 Runtime（Windows 11 内置）
+- **可选增强**：Pandoc（转换 / 导入）、LibreOffice（高保真预览）、Windows OCR 语言包（图片识别）——均可在「设置 → 组件」查看状态
+- **开发**：Node.js ≥ 20、Rust stable（MSVC）、VS Build Tools（C++ 工作负载）
+
+## 安装
+
+### 方式一：安装包（推荐）
+
+从 [GitHub Releases](https://github.com/enpiaohj/markflow/releases) 下载 `MarkFlow-vX.Y.Z-win-x64.exe` 运行安装。
+安装包未做代码签名，首次运行如触发 SmartScreen 提示，选择「更多信息 → 仍要运行」。
+
+### 方式二：便携版
+
+下载 `MarkFlow-vX.Y.Z-win-x64-portable.exe` 单文件直接运行，不写注册表。
+
+### 方式三：从源码构建
+
+见《[开发指南](docs/2026-09-21-MarkFlow开发指南-v1.0.md)》。
+
+## 快速上手（5 分钟）
+
+1. **建库**：启动后点击「创建文档库」→ 选择一个本地文件夹（例如项目文档目录）→ 保持默认索引设置 → 创建。文件不会被移动或修改。
+2. **浏览**：左侧目录树双击展开；中央列表可按名称 / 修改时间 / 大小排序；右侧查看文件详情。
+3. **搜索**：`Ctrl + K` 输入关键词（如「负载均衡」），命中片段高亮，点击结果直接跳到所在位置。
+4. **编辑**：双击 Markdown 文件进入可视化编辑，`Ctrl + S` 保存；用其他程序改动文件后 MarkFlow 会自动同步。
+5. **AI（可选）**：设置 → AI 中添加 Provider 与 API Key → 编辑器右上「AI 助手」基于当前文档问答或润色。
+
+更多细节见《[使用指南](docs/2026-09-21-MarkFlow使用指南-v1.0.md)》。
 
 ## 项目结构
 
 ```
 MarkFlow/
-├─ docs/产品设计/          # 产品设计文档与 UI 概念设计图
-├─ public/                  # 静态资源
-├─ src/                     # React 前端
-│  ├─ components/           # 标题栏、活动栏、状态栏等
-│  ├─ views/                # 一级导航视图
-│  ├─ navigation.ts         # 导航模型
-│  └─ index.css             # Tailwind 与设计令牌
-├─ src-tauri/               # Tauri 2（Rust 后端）
-│  ├─ src/                  # Rust 入口与命令
-│  ├─ capabilities/         # Tauri 能力权限
-│  └─ tauri.conf.json       # 应用与窗口配置
+├─ docs/                          # 产品设计、使用指南、开发指南
+│  └─ 产品设计/                    # 设计方案 v2.0 与 10 张 UI 概念图
+├─ public/                        # 静态资源（应用图标）
+├─ src/                           # React 前端
+│  ├─ components/                 # 标题栏 / 活动栏 / 状态栏 / 向导 / 编辑器 /
+│  │                              # 查看器 / AI 面板 / 批注面板 / 各 Context
+│  ├─ views/                      # 开始 / 文档库 / 搜索 / 任务 / 历史 / 设置
+│  ├─ lib/                        # 后端 API 封装、类型、格式映射
+│  ├─ navigation.ts               # 一级导航模型
+│  └─ index.css                   # Tailwind 与设计令牌
+├─ src-tauri/                     # Tauri 2（Rust 后端）
+│  ├─ src/
+│  │  ├─ format.rs                # 格式注册表（识别 + 显示名）
+│  │  ├─ library.rs               # 文档库 / 扫描 / 索引 / 搜索 / 版本
+│  │  ├─ editor.rs                # 读取 / 原子保存 / 冲突 / 快照恢复
+│  │  ├─ ocr.rs                   # Windows OCR
+│  │  ├─ office.rs                # DOCX/XLSX/PPTX OOXML 提取与预览
+│  │  ├─ convert.rs               # Pandoc 转换 / LibreOffice 转 PDF
+│  │  ├─ component_manager.rs     # 可选组件探测与健康状态
+│  │  ├─ delivery.rs              # 正式交付中心
+│  │  ├─ tasks.rs                 # 后台任务管理器
+│  │  ├─ watch.rs                 # 文件监听与防抖重扫
+│  │  ├─ sensitive.rs             # 敏感信息扫描
+│  │  ├─ checks.rs                # 文档质量检查
+│  │  └─ ai.rs                    # AI Provider / 上下文门禁 / 流式对话
+│  ├─ capabilities/               # Tauri 能力权限（最小授权）
+│  └─ tauri.conf.json             # 应用与窗口配置
 └─ index.html / vite.config.ts / package.json
 ```
 
-## 开发环境
+## 架构概览
+
+- **进程模型**：Tauri 2——Rust 后端承载全部文件与索引操作，前端只负责渲染与交互；两侧经 Tauri Command（JSON）与二进制 IPC（文件字节流）通信，事件（`scan:completed`、`library:changed`、`tasks:updated` 等）驱动界面刷新。
+- **数据存储**：索引与元数据（库、文件、提取文本、FTS、历史版本、批注、任务、交付记录）存于用户应用数据目录的 `markflow.db`（SQLite，WAL）；**正文永远以文件系统为准**，数据库可随时删除重建。
+- **Sidecar 安全**：Pandoc / LibreOffice / Edge 均以参数数组调用（无 Shell 拼接）、带超时、独立临时目录与 Profile、用后清理。
+- **权限最小化**：文件读取命令校验目标已登记在文档库索引中；窗口控制按需授权。
+
+## 开发
 
 ```powershell
-# 前置：安装 Rust（https://rustup.rs）与 VS Build Tools（C++ 工作负载）
-npm install
+npm install            # 安装前端依赖
+npm run tauri dev      # 开发模式（热重载桌面窗口）
+npm run build          # 前端类型检查 + 生产构建
+npm run tauri build    # 完整发布构建（NSIS 安装包）
+cargo test             # Rust 单元 / 集成测试（src-tauri 下）
 ```
 
-## Build / Run / Test
+测试策略、模块职责、发布流程与常见开发问题详见《[开发指南](docs/2026-09-21-MarkFlow开发指南-v1.0.md)》。
 
-```powershell
-# 开发模式（热重载，启动桌面窗口）
-npm run tauri dev
+## 故障排查（FAQ）
 
-# 前端生产构建（tsc + vite build）
-npm run build
-
-# 桌面应用构建（生成安装包）
-npm run tauri build
-
-# Rust 侧编译检查
-cd src-tauri; cargo check
-```
-
-## Test
-
-当前无自动化测试（工程骨架阶段）。测试体系（Vitest、RTL、Playwright、Rust tests、Golden Tests）
-按设计文档第 18 节随功能实现逐步建立。
-
-## Release
-
-- 遵循 Semantic Versioning；正式发布创建 `releases/vX.Y.Z/` 快照并上传 GitHub Releases。
-- 发布产物命名：`MarkFlow-v<版本>-win-x64.<ext>`。
-- 详见 `AGENTS.md` 的 Repository Rule。
+| 现象 | 处理 |
+|---|---|
+| 安装时 SmartScreen 提示 | 安装包未签名所致，选「更多信息 → 仍要运行」 |
+| 图片 OCR 提示未安装语言包 | Windows 设置 → 时间和语言 → 语言 → 添加中文（简体）语言 |
+| 保存提示「文件已被外部程序修改」 | 文件在编辑期间被其他程序改过，按需选择覆盖 / 重新载入 |
+| PDF/DOCX 转换按钮灰色 | 缺少对应组件，查看「设置 → 组件」并安装 Pandoc / LibreOffice |
+| git 推送卡死或弹凭据窗口 | 见《开发指南》故障排查节（代理与凭据助手链） |
+| 索引疑似不一致 | 触发任意文件变更由监听自动重扫，或重启应用重建（索引可随时重建，原文不受影响） |
 
 ## 文档
 
-- 产品设计：`docs/产品设计/`
-- 变更记录：[CHANGELOG.md](CHANGELOG.md)
-- 项目规则：[AGENTS.md](AGENTS.md)
+| 文档 | 说明 |
+|---|---|
+| [产品设计与技术实施方案 v2.0](docs/产品设计/2026-09-20-MarkFlow-多格式本地文档库产品设计与技术实施方案-v2.0.md) | 产品定位、功能闭环、技术架构、路线图 |
+| [UI 概念设计图](docs/产品设计/UI概念设计图/) | 10 张核心界面概念稿 |
+| [使用指南 v1.0](docs/2026-09-21-MarkFlow使用指南-v1.0.md) | 分功能操作手册与常见问题 |
+| [开发指南 v1.0](docs/2026-09-21-MarkFlow开发指南-v1.0.md) | 环境搭建、架构、测试、发布流程 |
+| [CHANGELOG](CHANGELOG.md) | 版本变更记录 |
+| [AGENTS.md](AGENTS.md) | 项目规则（Repository Rule） |
+
+## 许可
+
+未定。当前为私有项目（All Rights Reserved），如需开源须先完成许可证与第三方授权检查。

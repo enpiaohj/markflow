@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 文档体系补充：重写 README（功能特性 / 安装方式 / 快速上手 / 项目结构 /
+  架构概览 / 故障排查 / 文档索引）；新增《使用指南 v1.0》（分功能操作手册、
+  数据存储与隐私说明、FAQ）与《开发指南 v1.0》（环境搭建、模块职责、
+  事件契约、测试策略、Git 工作流、发布流程落地步骤、常见开发问题）。
+
 ## [0.3.0] - 2026-09-21
 
 ### Added

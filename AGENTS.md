@@ -55,6 +55,13 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 - 新增 Tauri 命令放 `src-tauri/src/`，在 `lib.rs` 的 `invoke_handler` 注册。
 - 不隐藏 Error / Warning；构建或测试失败时定位根因，不得删测试绕过。
 
+## 文档索引
+
+- 产品设计：`docs/产品设计/`
+- 使用指南：`docs/2026-09-21-MarkFlow使用指南-v1.0.md`
+- 开发指南（环境 / 模块职责 / 测试 / 发布流程）：`docs/2026-09-21-MarkFlow开发指南-v1.0.md`
+- 变更记录：`CHANGELOG.md`
+
 ## 版本与发布
 
 - P0 路线：v0.1 文档库基础 → v0.2 原生编辑与搜索 → v0.3 PDF/Office 与转换 → v0.4 AI 与审阅 → v0.5 正式交付。
