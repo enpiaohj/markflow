@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -53,27 +53,44 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => ctx.onSelect(entry)}
-        onDoubleClick={() => ctx.onOpen(entry)}
+      <div
+        className={`flex w-full items-center gap-0.5 rounded-md pr-2 text-left text-[13px] transition-colors ${
+          selected ? "bg-primary-50 text-primary-700" : "hover:bg-gray-100"
+        }`}
+        style={{ paddingLeft: `${depth * 14 + 4}px` }}
         onContextMenu={(e) => {
           e.preventDefault();
           ctx.onContextMenu(entry, e.clientX, e.clientY);
         }}
-        title={entry.isDir ? "双击展开/收起" : "双击打开（编辑 / 预览）"}
-        className={`flex w-full items-center gap-1 rounded-md py-1.5 pr-2 text-left text-[13px] transition-colors ${
-          selected ? "bg-primary-50 text-primary-700" : "text-gray-700 hover:bg-gray-100"
-        }`}
-        style={{ paddingLeft: `${depth * 14 + 6}px` }}
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-gray-400">
-          {entry.isDir &&
-            (isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />)}
-        </span>
-        <FileTypeIcon format={entry.format} size="sm" />
-        <span className="truncate">{entry.name}</span>
-      </button>
+        {/* 箭头：单击即展开 / 收起（目录专用） */}
+        <button
+          type="button"
+          aria-label={isOpen ? "收起" : "展开"}
+          title={isOpen ? "收起" : "展开"}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (entry.isDir) ctx.toggle(entry);
+          }}
+          className="flex h-6 w-4 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+        >
+          {entry.isDir && (isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />)}
+        </button>
+        {/* 名称区：单击选中（目录同时切换列表），双击打开 */}
+        <button
+          type="button"
+          onClick={() => ctx.onSelect(entry)}
+          onDoubleClick={() => {
+            if (entry.isDir) ctx.toggle(entry);
+            else ctx.onOpen(entry);
+          }}
+          title={entry.isDir ? "单击查看 · 点箭头展开 · 双击打开" : "双击打开（编辑 / 预览）"}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pr-2"
+        >
+          <FileTypeIcon format={entry.format} size="sm" />
+          <span className="truncate">{entry.name}</span>
+        </button>
+      </div>
       {entry.isDir && isOpen && (
         <div>
           {children === null && (
@@ -133,15 +150,16 @@ export default function LibraryView() {
     [],
   );
 
-  // 切换文档库 / 扫描完成 / 文件监听重扫 → 重置并加载根目录
+  // 切换文档库 → 整体重置并加载根目录（仅在库 ID 变化时触发，重扫不重置）
+  const libraryId = current?.id;
   useEffect(() => {
-    if (!current) return;
+    if (!libraryId) return;
     let cancelled = false;
     setCurrentDir("");
     setExpanded(new Set());
     setCache(new Map());
     setSelected(null);
-    void loadDir(current.id, "").then((entries) => {
+    void loadDir(libraryId, "").then((entries) => {
       if (!cancelled) {
         setTreeRoot(entries);
         setList(entries);
@@ -150,7 +168,36 @@ export default function LibraryView() {
     return () => {
       cancelled = true;
     };
-  }, [current, scanStatus.phase, contentVersion, loadDir]);
+  }, [libraryId, loadDir]);
+
+  // 扫描完成 / 文件监听重扫 → 刷新根目录、已展开目录与当前列表（保留展开状态与选中）
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  const currentDirRef = useRef(currentDir);
+  currentDirRef.current = currentDir;
+  useEffect(() => {
+    if (!current) return;
+    let cancelled = false;
+    (async () => {
+      const rootEntries = await loadDir(current.id, "");
+      if (cancelled) return;
+      setTreeRoot(rootEntries);
+      // 刷新所有已展开目录的子项（保留展开状态）
+      const paths = [...cacheRef.current.keys()];
+      for (const p of paths) {
+        const children: FileEntry[] = await loadDir(current.id, p);
+        if (cancelled) return;
+        setCache((prev) => new Map(prev).set(p, children));
+      }
+      // 当前目录列表同步刷新
+      const dir = currentDirRef.current;
+      const listEntries = dir === "" ? rootEntries : await loadDir(current.id, dir);
+      if (!cancelled) setList(listEntries);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [current, contentVersion, loadDir]);
 
   // 搜索结果点击聚焦：跳到文件所在目录并选中
   useEffect(() => {

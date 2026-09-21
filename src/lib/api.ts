@@ -295,3 +295,8 @@ export function deleteLibraryEntry(libraryId: string, relativePath: string): Pro
 export function listLibraryDirs(libraryId: string): Promise<string[]> {
   return invoke("list_library_dirs", { libraryId });
 }
+
+/** 手动触发指定文档库全量重扫 */
+export function rescanLibrary(libraryId: string): Promise<void> {
+  return invoke("rescan_library", { libraryId });
+}

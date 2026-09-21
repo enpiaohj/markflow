@@ -701,6 +701,17 @@ fn delete_annotation(state: State<'_, AppState>, id: i64) -> Result<(), String> 
     annotations::delete(&state.0.lock().unwrap(), id)
 }
 
+/// 手动触发指定文档库的全量重扫（如重新打开库时刷新索引）。
+#[tauri::command]
+fn rescan_library(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+) -> Result<(), String> {
+    rescan_library_bg(&app, &state, &tasks, &library_id)
+}
+
 /// 新建文件夹。
 #[tauri::command]
 fn create_library_directory(
@@ -924,6 +935,7 @@ pub fn run() {
             create_text_file,
             list_library_files,
             list_library_dirs,
+            rescan_library,
             create_library_directory,
             rename_library_entry,
             move_library_entry,

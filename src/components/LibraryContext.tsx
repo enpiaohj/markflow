@@ -180,6 +180,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     });
     setFocusFile(null);
     setViewRequest({ target: "library", nonce: Date.now() });
+    // 重新打开库时刷新索引（闭库期间的磁盘变化）并恢复监听
+    api.rescanLibrary(id).catch((err) => console.error("重扫失败", err));
     api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
   }, []);
 

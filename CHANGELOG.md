@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 目录树展开体验修复：箭头改为独立按钮（单击即展开 / 收起，无需双击）；
+  重扫、保存、外部文件变化后**不再折叠整棵树**，展开状态与当前目录保持；
+  重新打开同一文档库时自动重扫一次，闭库期间的磁盘变化即时反映。
+
 ### Added
 
 - 文档体系补充：重写 README（功能特性 / 安装方式 / 快速上手 / 项目结构 /
