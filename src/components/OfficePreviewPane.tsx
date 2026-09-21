@@ -16,7 +16,10 @@ import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import { officeKind } from "../lib/format";
 import { useExternalChange } from "../lib/useExternalChange";
+import DocxWebView from "./office/DocxWebView";
 import PptxViewer from "./office/PptxViewer";
+import PptxWebViewer from "./office/PptxWebViewer";
+import { friendlyOfficeError } from "./office/safeLinks";
 import XlsxGrid from "./office/XlsxGrid";
 import type { OfficePreview } from "../lib/types";
 
@@ -35,7 +38,10 @@ export default function OfficePreviewPane() {
   const [activeSheet, setActiveSheet] = useState(0);
   const [engine, setEngine] = useState<"office" | "libreoffice" | "" | null>(null);
   const [hifiError, setHifiError] = useState("");
-  const [pptxText, setPptxText] = useState(false);
+  // 用户主动选择纯文本预览；内置渲染 / 幻灯片图片失败时的原因（失败后自动回退）
+  const [textOnly, setTextOnly] = useState(false);
+  const [webFail, setWebFail] = useState("");
+  const [imgFail, setImgFail] = useState("");
   const autoTriedRef = useRef(0);
   const hifiTicketRef = useRef(0);
   const aliveRef = useRef(true);
@@ -65,6 +71,8 @@ export default function OfficePreviewPane() {
 
   useEffect(() => {
     if (!current || !viewerFile || viewerFile.kind !== "office") return;
+    setWebFail("");
+    setImgFail("");
     // Excel 使用原生表格视图（自带解析），不需要文本预览数据
     if (officeKind(viewerFile.relativePath) === "excel") {
       setPreview(null);
@@ -171,6 +179,20 @@ export default function OfficePreviewPane() {
     setHifiLoading(false);
   }
 
+  // ---- 显示模式：按格式、可用引擎与失败回退决定 ----
+  const kind = officeKind(rel);
+  type Mode = "xlsx" | "docx-web" | "pptx-images" | "pptx-web" | "text" | "detecting";
+  let mode: Mode;
+  if (kind === "excel") mode = "xlsx";
+  else if ((kind === "word" || kind === "powerpoint") && engine === null) mode = "detecting";
+  else if (viewerFile.preferText || textOnly) mode = "text";
+  else if (kind === "word") mode = webFail ? "text" : "docx-web";
+  else if (kind === "powerpoint") mode = engine === "office" && !imgFail ? "pptx-images" : webFail ? "text" : "pptx-web";
+  else mode = "text";
+  const webFallbackNote = webFail || imgFail;
+  const badge =
+    mode === "xlsx" ? "原生表格" : mode === "pptx-images" ? "幻灯片" : mode === "docx-web" || mode === "pptx-web" ? "内置渲染" : "文本快速预览";
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* 工具栏 */}
@@ -186,13 +208,7 @@ export default function OfficePreviewPane() {
         <span className="h-4 w-px bg-gray-200" />
         <FileSpreadsheet className="h-4 w-4 shrink-0 text-gray-400" />
         <span className="min-w-0 truncate text-[13px] font-medium text-gray-800">{rel}</span>
-        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">
-          {officeKind(rel) === "excel"
-            ? "原生表格"
-            : officeKind(rel) === "powerpoint" && engine === "office" && !viewerFile.preferText && !pptxText
-              ? "幻灯片"
-              : "文本快速预览"}
-        </span>
+        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">{badge}</span>
         <div className="ml-auto flex items-center gap-2">
           {preview?.kind === "docx" && (
             <button
@@ -206,17 +222,17 @@ export default function OfficePreviewPane() {
               转换为可编辑文档
             </button>
           )}
-          {officeKind(rel) === "powerpoint" && engine === "office" && (
+          {(kind === "word" || kind === "powerpoint") && (
             <button
               type="button"
-              onClick={() => setPptxText((v) => !v)}
-              title="在幻灯片图片与文本大纲之间切换"
+              onClick={() => setTextOnly((v) => !v)}
+              title={textOnly ? "回到渲染视图" : "只看提取出的文字（Word 为目录 + 正文，PowerPoint 为大纲）"}
               className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50"
             >
-              {pptxText ? "幻灯片" : "文本大纲"}
+              {textOnly || viewerFile.preferText ? (kind === "word" ? "文档视图" : "幻灯片") : kind === "word" ? "纯文本" : "文本大纲"}
             </button>
           )}
-          {engine && !(officeKind(rel) === "powerpoint" && engine === "office") && (
+          {engine && !(kind === "powerpoint" && engine === "office") && (
             <button
               type="button"
               onClick={() => void openHifi()}
@@ -245,11 +261,18 @@ export default function OfficePreviewPane() {
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           <span className="flex-1">
             正在用{engine === "libreoffice" ? " LibreOffice" : " Microsoft Office"}
-            生成精确版式（后台只读打开并导出，不会修改原文件；首次需要几秒，之后使用缓存）。生成完成后自动切换，下方先显示目录与文字内容。
+            生成精确版式（后台只读打开并导出，不会修改原文件；首次需要几秒，之后使用缓存）。生成完成后自动切换，期间先显示内置渲染的结果。
           </span>
           <button type="button" onClick={cancelHifi} className="rounded border border-primary-200 bg-white px-2 py-0.5 text-primary-700 hover:bg-primary-50">
             取消
           </button>
+        </div>
+      )}
+
+      {webFallbackNote && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          <span className="font-medium">渲染失败，已回退到文本预览：</span>
+          <span className="break-all">{webFallbackNote}</span>
         </div>
       )}
 
@@ -328,22 +351,34 @@ export default function OfficePreviewPane() {
       {/* 内容 */}
       <div
         className="min-h-0 flex-1 overflow-auto"
-        style={officeKind(rel) === "powerpoint" && engine === "office" && !pptxText ? undefined : { zoom: zoomConfig.value }}
+        style={mode === "text" || mode === "xlsx" ? { zoom: zoomConfig.value } : undefined}
       >
-        {officeKind(rel) === "excel" ? (
+        {mode === "xlsx" ? (
           <XlsxGrid libraryId={current.id} relativePath={rel} reloadKey={reloadNonce} />
-        ) : officeKind(rel) === "powerpoint" && engine === "office" && !viewerFile.preferText && !pptxText ? (
+        ) : mode === "detecting" ? (
+          <div className="flex h-full flex-col items-center justify-center text-gray-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : mode === "docx-web" ? (
+          <DocxWebView
+            libraryId={current.id}
+            relativePath={rel}
+            reloadKey={reloadNonce}
+            headings={preview?.kind === "docx" ? preview.headings : []}
+            zoom={zoomConfig.value}
+            onFail={setWebFail}
+          />
+        ) : mode === "pptx-images" ? (
           <PptxViewer
             libraryId={current.id}
             relativePath={rel}
             reloadKey={reloadNonce}
             titles={preview?.kind === "pptx" ? preview.slides.map((s) => s.title) : []}
             zoom={zoomConfig.value}
-            onFail={(msg) => {
-              setHifiError(msg);
-              setPptxText(true);
-            }}
+            onFail={(msg) => setImgFail(friendlyOfficeError(msg))}
           />
+        ) : mode === "pptx-web" ? (
+          <PptxWebViewer libraryId={current.id} relativePath={rel} reloadKey={reloadNonce} zoom={zoomConfig.value} onFail={setWebFail} />
         ) : loading ? (
           <div className="flex h-full flex-col items-center justify-center text-gray-400">
             <Loader2 className="h-6 w-6 animate-spin" />
@@ -352,7 +387,7 @@ export default function OfficePreviewPane() {
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center px-6">
             <TriangleAlert className="h-7 w-7 text-amber-400" />
-            <p className="mt-3 max-w-md break-all text-center text-sm text-gray-500">{error}</p>
+            <p className="mt-3 max-w-md break-all text-center text-sm text-gray-500">{friendlyOfficeError(error)}</p>
             <button
               type="button"
               onClick={openInSystem}

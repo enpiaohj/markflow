@@ -358,7 +358,7 @@ async fn office_hifi_engine(relative_path: String) -> String {
         let format = crate::format::detect_format(relative_path.rsplit('/').next().unwrap_or(&relative_path));
         if officepdf::office_available(format) {
             "office".to_string()
-        } else if component_manager::detect_soffice().is_some() {
+        } else if component_manager::detect_soffice_engine().is_some() {
             "libreoffice".to_string()
         } else {
             String::new()
@@ -473,7 +473,7 @@ async fn convert_office_to_pdf(
                 Err(e) => office_err = Some(e),
             }
         }
-        if let Some(soffice) = component_manager::detect_soffice() {
+        if let Some(soffice) = component_manager::detect_soffice_engine() {
             return convert::office_to_pdf_bytes(&soffice, &path)
                 .map_err(|e| match office_err {
                     Some(oe) => format!("{oe}\n回退 LibreOffice 也失败：{e}"),

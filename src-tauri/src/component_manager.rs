@@ -17,6 +17,21 @@ pub struct ComponentStatus {
     pub path: String,
 }
 
+/// 是否禁用 Office / LibreOffice 版式引擎：环境变量 `MARKFLOW_NO_OFFICE=1`。
+/// 用于在装了 Office 的机器上模拟「无 Office 的虚拟机」做测试，或排查外部引擎导致的问题；
+/// 禁用后 Word / PowerPoint 使用内置的网页渲染器，Excel 本来就是原生表格。
+pub fn engines_disabled() -> bool {
+    matches!(std::env::var("MARKFLOW_NO_OFFICE").as_deref(), Ok("1") | Ok("true") | Ok("TRUE"))
+}
+
+/// 版式预览用的 LibreOffice：被禁用时视为不存在。
+pub fn detect_soffice_engine() -> Option<PathBuf> {
+    if engines_disabled() {
+        return None;
+    }
+    detect_soffice()
+}
+
 /// 探测 pandoc.exe：PATH → 常见安装位置。
 pub fn detect_pandoc() -> Option<PathBuf> {
     find_in_path("pandoc.exe")

@@ -80,6 +80,9 @@ fn kind_of(format: &str) -> Option<(&'static str, &'static str)> {
 
 /// 本机是否安装了该格式对应的 Office 应用（只查注册表，不启动任何 Office 程序）。
 pub fn office_available(format: &str) -> bool {
+    if crate::component_manager::engines_disabled() {
+        return false;
+    }
     let Some((_, prog_id)) = kind_of(format) else { return false };
     let mut cmd = Command::new("reg");
     cmd.args(["query", &format!("HKCR\\{prog_id}\\CLSID"), "/ve"]);
