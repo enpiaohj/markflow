@@ -279,7 +279,7 @@ function SourceEditor({
 // ---------------------------------------------------------------------------
 
 export default function EditorPane() {
-  const { current, openFile, closeFile, setEditorDirty, confirmDiscard } = useLibrary();
+  const { current, openFile, closeFile, setEditorDirty, confirmDiscard, tabActive } = useLibrary();
   const { configure: configureZoom } = useZoom();
   const dialog = useDialog();
   const [encoding, setEncoding] = useState("UTF-8");
@@ -422,14 +422,16 @@ export default function EditorPane() {
 
   // Ctrl+S 保存
   useEffect(() => {
+    // 多个文档标签同时挂载：只有激活的标签响应保存
     const onKey = (e: KeyboardEvent) => {
+      if (!tabActive) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         if (dirty) void doSave(false);
       }
     };
     const onMenuSave = () => {
-      if (dirty) void doSave(false);
+      if (tabActive && dirty) void doSave(false);
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener(MENU_SAVE_EVENT, onMenuSave);
@@ -437,7 +439,7 @@ export default function EditorPane() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener(MENU_SAVE_EVENT, onMenuSave);
     };
-  }, [saveState, doSave]);
+  }, [saveState, doSave, tabActive]);
 
   // 切换模式时同步文本来源；切到可视化前提示无法无损保留的语法
   async function switchMode(next: "visual" | "source") {
@@ -606,7 +608,9 @@ export default function EditorPane() {
   useEffect(() => {
     if (!current || !rel) return;
     const key = draftKey(current.id, rel);
-    const onDiscard = () => {
+    const onDiscard = (e: Event) => {
+      const d = (e as CustomEvent<{ libraryId: string; relativePath: string } | undefined>).detail;
+      if (d && (d.libraryId !== current.id || d.relativePath !== rel)) return;
       try {
         localStorage.removeItem(key);
       } catch {

@@ -68,7 +68,7 @@ function PrivacyPoint({ icon: Icon, title, description }: { icon: typeof Zap; ti
  * MarkFlow 只读取文件内容做索引，不移动、不复制、不修改任何文件。
  */
 export default function CreateLibraryWizard() {
-  const { wizardOpen, closeWizard, libraryCreated } = useLibrary();
+  const { wizardOpen, closeWizard, libraryCreated, libraries } = useLibrary();
   const [step, setStep] = useState(0);
   const [rootPath, setRootPath] = useState("");
   const [quick, setQuick] = useState<QuickScanResult | null>(null);
@@ -79,6 +79,7 @@ export default function CreateLibraryWizard() {
   const [portableMeta, setPortableMeta] = useState(false);
   const [extraExcludes, setExtraExcludes] = useState("");
   const [creating, setCreating] = useState(false);
+  const [libName, setLibName] = useState("");
 
   useEffect(() => {
     if (wizardOpen) {
@@ -107,6 +108,7 @@ export default function CreateLibraryWizard() {
     const selected = await open({ directory: true, multiple: false });
     if (!selected) return;
     setRootPath(selected);
+    setLibName(suggestName(selected));
     setScanning(true);
     try {
       const result = await api.quickScanLibrary(selected, parseExcludes());
@@ -131,12 +133,32 @@ export default function CreateLibraryWizard() {
     }
   }
 
+  /** 以文件夹名作为默认库名；与已有库重名时自动加序号 */
+  function suggestName(path: string): string {
+    const base = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "文档库";
+    let name = base;
+    for (let i = 2; libraries.some((l) => l.name.trim().toLowerCase() === name.toLowerCase()); i++) name = `${base} (${i})`;
+    return name;
+  }
+
+  const nameTrim = libName.trim();
+  const nameError = !nameTrim
+    ? "请输入文档库名称"
+    : libraries.some((l) => l.name.trim().toLowerCase() === nameTrim.toLowerCase())
+      ? "已有同名文档库，请换一个名称（名称用于在多个库之间区分）"
+      : null;
+
   async function submit() {
+    if (nameError) {
+      setError(nameError);
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
       const meta = await api.createLibrary({
         rootPath,
+        name: nameTrim,
         excludeDirs: parseExcludes(),
         fullTextIndex,
         ocrEnabled,
@@ -335,6 +357,17 @@ export default function CreateLibraryWizard() {
             <div className="grid grid-cols-[1fr_260px] gap-6">
               <div>
                 <p className="text-sm font-medium text-gray-700">创建摘要</p>
+                <label className="mt-3 block text-[13px] text-gray-500">文档库名称（必填，用于在多个库之间区分）</label>
+                <input
+                  type="text"
+                  value={libName}
+                  onChange={(e) => {
+                    setLibName(e.target.value);
+                    setError(null);
+                  }}
+                  className={`mt-1 h-9 w-full rounded-lg border px-3 text-sm outline-none focus:border-primary-500 ${nameError ? "border-red-300" : "border-gray-200"}`}
+                />
+                {nameError && <p className="mt-1 text-xs text-red-500">{nameError}</p>}
                 <dl className="mt-3 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
                   <div className="flex justify-between gap-4">
                     <dt className="shrink-0 text-gray-500">库文件夹</dt>
@@ -404,7 +437,7 @@ export default function CreateLibraryWizard() {
           {step === 2 && (
             <button
               type="button"
-              disabled={creating}
+              disabled={creating || !!nameError}
               onClick={submit}
               className="flex h-9 items-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60"
             >

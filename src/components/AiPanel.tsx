@@ -195,7 +195,7 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
     const defaultName = `AI-回答-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, "")}.md`;
     const name = await dialog.prompt({
       title: "保存为新文档",
-      label: "文件名（保存在当前文件所在目录）",
+      label: `文件名（保存到文档库「${current.name}」中当前文件所在目录）`,
       defaultValue: defaultName,
       validate: (v) => (v.trim() ? null : "文件名不能为空"),
     });

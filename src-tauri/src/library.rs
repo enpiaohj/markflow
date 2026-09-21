@@ -257,6 +257,16 @@ pub fn create_library(
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "未命名文档库".into())
         });
+    let dup: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM libraries WHERE lower(name) = lower(?1))",
+            [name.trim()],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if dup {
+        return Err(format!("已有名为「{}」的文档库，请换一个名称。", name.trim()));
+    }
     let settings = json!({
         "excludeDirs": req.exclude_dirs,
         "fullTextIndex": req.full_text_index,

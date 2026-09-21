@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export interface ZoomConfig {
   value: number;
@@ -77,4 +77,34 @@ export function useZoom(): ZoomContextValue {
   const ctx = useContext(ZoomContext);
   if (!ctx) throw new Error("useZoom 必须在 ZoomProvider 内使用");
   return ctx;
+}
+
+/**
+ * 标签作用域内的缩放：多个文档面板同时挂载时，只有激活标签的 configure 才作用到状态栏；
+ * 非激活标签的声明先记下，切回该标签时重放，避免隐藏面板的挂载 / 卸载抢占状态栏的缩放控件。
+ */
+export function ZoomScope({ active, children }: { active: boolean; children: ReactNode }) {
+  const base = useZoom();
+  const lastRef = useRef<Partial<ZoomConfig> | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const baseConfigure = base.configure;
+
+  const configure = useCallback(
+    (patch: Partial<ZoomConfig>) => {
+      lastRef.current = { ...(lastRef.current ?? {}), ...patch };
+      if (activeRef.current) baseConfigure(patch);
+    },
+    [baseConfigure],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    if (lastRef.current) baseConfigure(lastRef.current);
+    // 离开该标签（切走 / 关闭）时隐藏缩放控件，由下一个激活的标签重新声明
+    return () => baseConfigure({ visible: false });
+  }, [active, baseConfigure]);
+
+  const value = useMemo(() => ({ ...base, configure }), [base, configure]);
+  return <ZoomContext.Provider value={value}>{children}</ZoomContext.Provider>;
 }

@@ -25,6 +25,26 @@ export interface ScanStatus {
   error: string | null;
 }
 
+/** 文档标签页：打开的文档一直保留，直到用户关闭 */
+export type TabKind = "editor" | "pdf" | "office" | "hifi" | "image" | "delivery";
+
+export interface DocTab {
+  id: string;
+  /** 所属文档库（打开时的快照，保证文档库切换后标签仍指向原库） */
+  lib: LibraryMeta;
+  relativePath: string;
+  kind: TabKind;
+  nonce: number;
+  /** hifi 模式：Office / LibreOffice 转出的 PDF 字节 */
+  bytes?: ArrayBuffer;
+  preferText?: boolean;
+  forceBuiltin?: boolean;
+}
+
+export function tabIdOf(libraryId: string, relativePath: string, kind: TabKind = "editor"): string {
+  return kind === "delivery" ? `${libraryId}::#delivery` : `${libraryId}::${relativePath}`;
+}
+
 /** 主视图切换请求：Shell 监听 nonce 变化后切换到 target 视图 */
 export type ViewRequestTarget = "home" | "library" | "search" | "graph" | "tasks" | "history" | "settings";
 
@@ -46,7 +66,23 @@ interface LibraryContextValue {
   wizardOpen: boolean;
   /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
   viewRequest: { target: ViewRequestTarget; nonce: number };
-  /** 关闭当前打开的文档（编辑器 / 查看器 / 交付中心）；有未保存修改会先确认 */
+  /** 打开的文档标签页（按打开顺序）与当前激活的标签（null = 显示主视图） */
+  tabs: DocTab[];
+  activeTabId: string | null;
+  activateTab: (id: string) => void;
+  /** 隐藏文档回到主视图（标签保留） */
+  showMain: () => void;
+  /** 关闭指定标签；有未保存修改会先确认 */
+  closeTab: (id: string) => Promise<void>;
+  /** 文件被重命名 / 移动 / 删除后，关闭该路径（含子路径）下的标签 */
+  closeTabsForPath: (libraryId: string, relativePath: string) => Promise<void>;
+  /** 各标签的未保存状态 */
+  dirtyTabs: Set<string>;
+  /** 当前显示的文档所属的库（无文档时为活动库），供状态栏使用 */
+  displayLibrary: LibraryMeta | null;
+  /** 标签作用域内：本标签是否为激活标签（主视图区域内为 true） */
+  tabActive: boolean;
+  /** 关闭当前激活的标签（Ctrl+W）；有未保存修改会先确认 */
   closeDocument: () => Promise<void>;
   /** 编辑器中有未保存修改时弹出确认；返回 true 表示可以继续（已放弃修改或无修改） */
   confirmDiscard: () => Promise<boolean>;
@@ -85,6 +121,8 @@ interface LibraryContextValue {
   requestTasksView: () => void;
   /** 打开（切换到）指定文档库并刷新列表 */
   switchToLibrary: (id: string) => Promise<void>;
+  /** 激活文档库但不切换主视图（在文档库视图内操作其他库时使用） */
+  activateLibrary: (id: string) => Promise<void>;
   /** 创建完成后调用：刷新列表、切到新库 */
   libraryCreated: (id: string) => Promise<void>;
   /** 从索引中移除文档库（不删除磁盘文件） */
@@ -146,33 +184,135 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [viewRequest, setViewRequest] = useState(INITIAL_VIEW);
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
-  const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
-  const [editorDirty, setEditorDirty] = useState(false);
-  const [deliveryOpen, setDeliveryOpen] = useState(false);
-  const [viewerFile, setViewerFile] = useState<{
-    relativePath: string;
-    kind: "pdf" | "office" | "hifi" | "image";
-    nonce: number;
-    bytes?: ArrayBuffer;
-    preferText?: boolean;
-    forceBuiltin?: boolean;
-  } | null>(null);
+  const [tabs, setTabs] = useState<DocTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
 
   const dialog = useDialog();
-  const dirtyRef = useRef(false);
-  dirtyRef.current = editorDirty;
+  const dirtyRef = useRef(dirtyTabs);
+  dirtyRef.current = dirtyTabs;
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
 
+  const activeTab = useMemo(() => tabs.find((t) => t.id === activeTabId) ?? null, [tabs, activeTabId]);
+  const openFile = useMemo(
+    () => (activeTab?.kind === "editor" ? { relativePath: activeTab.relativePath, nonce: activeTab.nonce } : null),
+    [activeTab],
+  );
+  const viewerFile = useMemo(
+    () =>
+      activeTab && activeTab.kind !== "editor" && activeTab.kind !== "delivery"
+        ? {
+            relativePath: activeTab.relativePath,
+            kind: activeTab.kind,
+            nonce: activeTab.nonce,
+            bytes: activeTab.bytes,
+            preferText: activeTab.preferText,
+            forceBuiltin: activeTab.forceBuiltin,
+          }
+        : null,
+    [activeTab],
+  );
+  const deliveryOpen = activeTab?.kind === "delivery";
+  const editorDirty = dirtyTabs.size > 0;
+
+  /** 存在未保存修改的标签时确认（用于退出应用等会一并丢弃所有编辑的操作） */
   const confirmDiscard = useCallback(async () => {
-    if (!dirtyRef.current) return true;
-    const ok = await dialog.confirm({
+    if (dirtyRef.current.size === 0) return true;
+    return dialog.confirm({
       title: "放弃未保存的修改？",
-      message: "当前文档有未保存的修改，继续操作将丢失这些修改。",
+      message: `有 ${dirtyRef.current.size} 个文档存在未保存的修改，继续操作将丢失这些修改。`,
       confirmText: "放弃修改",
       danger: true,
     });
-    if (ok) window.dispatchEvent(new CustomEvent("markflow:discard-draft"));
-    return ok;
   }, [dialog]);
+
+  const setTabDirty = useCallback((id: string, dirty: boolean) => {
+    setDirtyTabs((prev) => {
+      if (prev.has(id) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  /** 打开或切到标签：同一文件只有一个标签；类型不变时保持原状态（不重新加载，保留未保存编辑与滚动位置） */
+  const upsertTab = useCallback((lib: LibraryMeta, relativePath: string, kind: TabKind, extra?: Partial<DocTab>) => {
+    const id = tabIdOf(lib.id, relativePath, kind);
+    setTabs((prev) => {
+      const old = prev.find((t) => t.id === id);
+      const sameKind = old && old.kind === kind && !extra?.bytes && !extra?.preferText && !extra?.forceBuiltin;
+      if (sameKind) return prev;
+      const tab: DocTab = { id, lib, relativePath, kind, nonce: Date.now(), ...extra };
+      return old ? prev.map((t) => (t.id === id ? tab : t)) : [...prev, tab];
+    });
+    setActiveTabId(id);
+  }, []);
+
+  const closeTabsNow = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const all = tabsRef.current;
+    const activeId = activeTabIdRef.current;
+    const rest = all.filter((t) => !ids.includes(t.id));
+    setTabs(rest);
+    setDirtyTabs((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next.size === prev.size ? prev : next;
+    });
+    // 被关闭的是激活标签 → 切到相邻标签，没有则回到主视图
+    if (activeId && ids.includes(activeId)) {
+      const idx = all.findIndex((t) => t.id === activeId);
+      const neighbor = rest[Math.min(idx, rest.length - 1)] ?? null;
+      setActiveTabId(neighbor ? neighbor.id : null);
+    }
+  }, []);
+
+  const confirmCloseTabs = useCallback(
+    async (ids: string[]): Promise<boolean> => {
+      const dirty = ids.filter((id) => dirtyRef.current.has(id));
+      if (dirty.length === 0) return true;
+      const names = dirty
+        .map((id) => tabsRef.current.find((t) => t.id === id)?.relativePath ?? id)
+        .join("\n");
+      const ok = await dialog.confirm({
+        title: "放弃未保存的修改？",
+        message: `以下文档有未保存的修改，关闭将丢失这些修改：\n\n${names}`,
+        confirmText: "放弃修改",
+        danger: true,
+      });
+      if (ok) {
+        for (const id of dirty) {
+          const t = tabsRef.current.find((x) => x.id === id);
+          if (t) window.dispatchEvent(new CustomEvent("markflow:discard-draft", { detail: { libraryId: t.lib.id, relativePath: t.relativePath } }));
+        }
+      }
+      return ok;
+    },
+    [dialog],
+  );
+
+  const closeTab = useCallback(
+    async (id: string) => {
+      if (!(await confirmCloseTabs([id]))) return;
+      closeTabsNow([id]);
+    },
+    [confirmCloseTabs, closeTabsNow],
+  );
+
+  const closeTabsForPath = useCallback(
+    async (libraryId: string, relativePath: string) => {
+      const ids = tabsRef.current
+        .filter((t) => t.lib.id === libraryId && t.kind !== "delivery" && (t.relativePath === relativePath || t.relativePath.startsWith(relativePath + "/")))
+        .map((t) => t.id);
+      if (!(await confirmCloseTabs(ids))) return;
+      closeTabsNow(ids);
+    },
+    [confirmCloseTabs, closeTabsNow],
+  );
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -278,9 +418,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const switchLibraryCore = useCallback(async (id: string, navigate: boolean) => {
     const meta = await api.openLibrary(id);
-    setOpenFile(null);
-    setViewerFile(null);
-    setEditorDirty(false);
     setCurrent(meta);
     addToWorkspace(meta);
     writeIds(LS_ACTIVE, meta.settings?.adhoc ? [] : [meta.id]);
@@ -294,24 +431,27 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     if (navigate) setViewRequest({ target: "library", nonce: Date.now() });
     // 打开 / 激活库时刷新索引（期间的磁盘变化）；单文件模式的隐式库只索引已打开的文件
     api.rescanLibrary(id).catch((err) => console.error("重扫失败", err));
+    return meta;
   }, [addToWorkspace]);
 
   const switchToLibrary = useCallback(
     async (id: string) => {
-      if (!(await confirmDiscard())) return;
       await switchLibraryCore(id, true);
     },
     [confirmDiscard, switchLibraryCore],
   );
 
+  const activateLibrary = useCallback(
+    async (id: string) => {
+      await switchLibraryCore(id, false);
+    },
+    [switchLibraryCore],
+  );
+
   const libraryCreated = useCallback(async (id: string) => {
-    if (!(await confirmDiscard())) return;
     setWizardOpen(false);
     const meta = await api.openLibrary(id);
     setLibraries((prev) => [meta, ...prev.filter((l) => l.id !== id)]);
-    setOpenFile(null);
-    setViewerFile(null);
-    setEditorDirty(false);
     setCurrent(meta);
     addToWorkspace(meta);
     toggleLibExpanded(meta.id, true); // 刚创建的库展开一次，方便看到内容
@@ -319,23 +459,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setScanStatus({ phase: "scanning", libraryId: meta.id, fileCount: 0, error: null });
     setFocusFile(null);
     setViewRequest({ target: "library", nonce: Date.now() });
-  }, [confirmDiscard, addToWorkspace, toggleLibExpanded]);
+  }, [addToWorkspace, toggleLibExpanded]);
 
   const removeLibrary = useCallback(
     async (id: string) => {
-      if (current?.id === id && !(await confirmDiscard())) return;
+      // 该库的打开文档一并关闭（有未保存修改先确认）
+      const ids = tabsRef.current.filter((t) => t.lib.id === id).map((t) => t.id);
+      if (!(await confirmCloseTabs(ids))) return;
+      closeTabsNow(ids);
       await api.removeLibrary(id);
       if (current?.id === id) {
-        setOpenFile(null);
-        setViewerFile(null);
-        setEditorDirty(false);
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
       }
       setOpenIds((prev) => prev.filter((x) => x !== id));
       await refreshLibraries();
     },
-    [current, refreshLibraries, confirmDiscard],
+    [current, refreshLibraries, confirmCloseTabs, closeTabsNow],
   );
 
   // 启动时：加载列表后恢复上次的活动库（工作区本身已由 openIds 恢复，并补一次增量重扫）
@@ -367,19 +507,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const closeLibraryInWorkspace = useCallback(
     async (id: string) => {
       if (current?.id === id) {
-        if (!(await confirmDiscard())) return;
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
         setFocusFile(null);
-        setOpenFile(null);
-        setViewerFile(null);
-        setDeliveryOpen(false);
-        setEditorDirty(false);
         writeIds(LS_ACTIVE, []);
       }
       setOpenIds((prev) => prev.filter((x) => x !== id));
     },
-    [current, confirmDiscard],
+    [current],
   );
 
   const requestView = useCallback((target: ViewRequestTarget) => {
@@ -396,8 +531,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const requestFocusFile = useCallback(
     (relativePath: string, libraryId?: string) => {
-      void confirmDiscard().then(async (ok) => {
-        if (!ok) return;
+      void (async () => {
         if (libraryId && currentIdRef.current !== libraryId) {
           try {
             await switchLibraryCoreRef.current(libraryId, false);
@@ -406,13 +540,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-        setOpenFile(null);
-        setViewerFile(null);
         setFocusFile({ relativePath, nonce: Date.now() });
         setViewRequest({ target: "library", nonce: Date.now() });
-      });
+      })();
     },
-    [confirmDiscard, dialog],
+    [dialog],
   );
 
   const currentIdRef = useRef<string | null>(null);
@@ -420,67 +552,58 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const switchLibraryCoreRef = useRef(switchLibraryCore);
   switchLibraryCoreRef.current = switchLibraryCore;
 
+  const currentRef = useRef<LibraryMeta | null>(null);
+  currentRef.current = current;
+
   const closeDocument = useCallback(async () => {
-    if (!(await confirmDiscard())) return;
-    setOpenFile(null);
-    setViewerFile(null);
-    setDeliveryOpen(false);
-    setEditorDirty(false);
-  }, [confirmDiscard]);
+    const id = activeTabIdRef.current;
+    if (id) await closeTab(id);
+  }, [closeTab]);
 
   const openInEditorGuarded = useCallback(
     (relativePath: string) => {
-      void confirmDiscard().then((ok) => {
-        if (!ok) return;
-        if (currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
-        setFocusFile(null);
-        setViewerFile(null);
-        setDeliveryOpen(false);
-        setOpenFile({ relativePath, nonce: Date.now() });
-      });
+      const lib = currentRef.current;
+      if (!lib) return;
+      void api.recordRecentOpen(lib.id, relativePath).catch(() => {});
+      setFocusFile(null);
+      upsertTab(lib, relativePath, "editor");
     },
-    [confirmDiscard],
+    [upsertTab],
   );
 
   const openInViewerGuarded = useCallback(
     (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) => {
-      void confirmDiscard().then((ok) => {
-        if (!ok) return;
-        if (kind !== "hifi" && currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
-        setOpenFile(null);
-        setDeliveryOpen(false);
-        setFocusFile(null);
-        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes, preferText: opts?.preferText, forceBuiltin: opts?.forceBuiltin });
-      });
+      const lib = currentRef.current;
+      if (!lib) return;
+      if (kind !== "hifi") void api.recordRecentOpen(lib.id, relativePath).catch(() => {});
+      setFocusFile(null);
+      upsertTab(lib, relativePath, kind, { bytes, preferText: opts?.preferText, forceBuiltin: opts?.forceBuiltin });
     },
-    [confirmDiscard],
+    [upsertTab],
   );
 
   const openPath = useCallback(
     async (path: string) => {
       try {
         const target = await api.openFilePath(path);
-        if (!(await confirmDiscard())) return;
-        if (currentIdRef.current !== target.libraryId) {
-          await switchLibraryCore(target.libraryId, false);
-        }
+        const lib =
+          currentIdRef.current === target.libraryId && currentRef.current
+            ? currentRef.current
+            : await switchLibraryCore(target.libraryId, false);
         setFocusFile(null);
-        setDeliveryOpen(false);
         const route = openRouteFor(target.format);
         if (route === "editor") {
-          setViewerFile(null);
-          setOpenFile({ relativePath: target.relativePath, nonce: Date.now() });
+          upsertTab(lib, target.relativePath, "editor");
         } else if (route === "system") {
           await api.openPathInSystem(target.libraryId, target.relativePath);
         } else {
-          setOpenFile(null);
-          setViewerFile({ relativePath: target.relativePath, kind: route, nonce: Date.now() });
+          upsertTab(lib, target.relativePath, route);
         }
       } catch (err) {
         await dialog.alert(String(err), "无法打开文件");
       }
     },
-    [confirmDiscard, dialog, switchLibraryCore],
+    [dialog, switchLibraryCore, upsertTab],
   );
 
   const pickAndOpenFile = useCallback(async () => {
@@ -534,8 +657,17 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       focusFile,
       openFile,
       editorDirty,
-      setEditorDirty,
+      setEditorDirty: () => {},
       confirmDiscard,
+      tabs,
+      activeTabId,
+      activateTab: (id: string) => setActiveTabId(id),
+      showMain: () => setActiveTabId(null),
+      closeTab,
+      closeTabsForPath,
+      dirtyTabs,
+      displayLibrary: activeTab?.lib ?? current,
+      tabActive: true,
       closeDocument,
       openPath,
       pickAndOpenFile,
@@ -547,6 +679,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       requestView,
       requestTasksView,
       switchToLibrary,
+      activateLibrary,
       libraryCreated,
       removeLibrary,
       closeCurrentLibrary: () => {
@@ -555,28 +688,66 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       requestFocusFile,
       openInEditor: openInEditorGuarded,
-      closeFile: () => setOpenFile(null),
+      closeFile: () => setActiveTabId(null),
       openInViewer: openInViewerGuarded,
-      closeViewer: () => setViewerFile(null),
+      closeViewer: () => setActiveTabId(null),
       openDelivery: () => {
-        void confirmDiscard().then((ok) => {
-          if (!ok) return;
-          setOpenFile(null);
-          setViewerFile(null);
-          setFocusFile(null);
-          setDeliveryOpen(true);
-        });
+        if (!current) return;
+        setFocusFile(null);
+        upsertTab(current, "", "delivery");
       },
-      closeDelivery: () => setDeliveryOpen(false),
+      closeDelivery: () => setActiveTabId(null),
     }),
-    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
+    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, tabs, activeTabId, activeTab, dirtyTabs, closeTab, closeTabsForPath, upsertTab, requestSearchView, requestView, requestTasksView, switchToLibrary, activateLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
   );
 
-  return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;
+  return (
+    <LibraryContext.Provider value={value}>
+      <SetTabDirtyContext.Provider value={setTabDirty}>{children}</SetTabDirtyContext.Provider>
+    </LibraryContext.Provider>
+  );
+}
+
+/** 标签作用域：把 current / openFile / viewerFile 等改写为「本标签」的视图，使各文档面板同时保持挂载、互不干扰 */
+const TabScopeContext = createContext<{ tab: DocTab; active: boolean } | null>(null);
+
+export function TabScope({ tab, active, children }: { tab: DocTab; active: boolean; children: ReactNode }) {
+  const value = useMemo(() => ({ tab, active }), [tab, active]);
+  return <TabScopeContext.Provider value={value}>{children}</TabScopeContext.Provider>;
 }
 
 export function useLibrary(): LibraryContextValue {
   const ctx = useContext(LibraryContext);
   if (!ctx) throw new Error("useLibrary 必须在 LibraryProvider 内使用");
-  return ctx;
+  const scope = useContext(TabScopeContext);
+  const { tab, active } = scope ?? { tab: null, active: true };
+  const { closeTab, showMain, activateTab, dirtyTabs } = ctx;
+  const setDirty = useContext(SetTabDirtyContext);
+  return useMemo(() => {
+    if (!tab) return ctx;
+    const isEditor = tab.kind === "editor";
+    const isViewer = tab.kind !== "editor" && tab.kind !== "delivery";
+    return {
+      ...ctx,
+      current: tab.lib,
+      tabActive: active,
+      openFile: isEditor ? { relativePath: tab.relativePath, nonce: tab.nonce } : null,
+      viewerFile: isViewer
+        ? { relativePath: tab.relativePath, kind: tab.kind as "pdf" | "office" | "hifi" | "image", nonce: tab.nonce, bytes: tab.bytes, preferText: tab.preferText, forceBuiltin: tab.forceBuiltin }
+        : null,
+      deliveryOpen: tab.kind === "delivery",
+      editorDirty: dirtyTabs.has(tab.id),
+      setEditorDirty: (dirty: boolean) => setDirty(tab.id, dirty),
+      // 标签内的「返回」只是回到主视图，标签保留；真正关闭用标签页上的 ×
+      confirmDiscard: async () => true,
+      closeFile: showMain,
+      closeViewer: showMain,
+      closeDelivery: showMain,
+      closeDocument: () => closeTab(tab.id),
+      activateTab,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, tab, active, dirtyTabs, setDirty, closeTab, showMain, activateTab]);
 }
+
+const SetTabDirtyContext = createContext<(id: string, dirty: boolean) => void>(() => {});

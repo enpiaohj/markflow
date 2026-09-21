@@ -12,8 +12,9 @@ import ImagePreviewPane from "./components/ImagePreviewPane";
 import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { DialogProvider, useDialog } from "./components/DialogContext";
-import { LibraryProvider, useLibrary } from "./components/LibraryContext";
-import { ZoomProvider } from "./components/ZoomContext";
+import { LibraryProvider, TabScope, useLibrary } from "./components/LibraryContext";
+import TabStrip from "./components/TabStrip";
+import { ZoomProvider, ZoomScope } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
 import DeliveryView from "./views/DeliveryView";
 import HomeView from "./views/HomeView";
@@ -40,15 +41,12 @@ const placeholderViews: Record<
 /** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
 function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
-  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, editorDirty, closeFile, closeViewer, closeDelivery, current, confirmDiscard } = useLibrary();
+  const { viewRequest, requestSearchView, tabs, activeTabId, showMain, editorDirty } = useLibrary();
   const dialog = useDialog();
 
-  /** 统一的视图切换入口：编辑器/查看器打开时先关闭（有未保存修改则确认） */
+  /** 统一的视图切换入口：切到一级视图（文档标签保留） */
   async function selectView(id: ViewId) {
-    if (openFile && !(await confirmDiscard())) return;
-    if (openFile) closeFile();
-    if (viewerFile) closeViewer();
-    if (deliveryOpen) closeDelivery();
+    showMain(); // 打开的文档保留为标签页，只是回到主视图
     setActiveView(id);
   }
 
@@ -125,34 +123,46 @@ function Shell() {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <ActivityBar activeView={activeView} onSelect={selectView} />
-        <main className="min-w-0 flex-1 overflow-hidden">
-          {openFile && current ? (
-            <EditorPane />
-          ) : deliveryOpen && current ? (
-            <DeliveryView />
-          ) : viewerFile && current ? (
-            viewerFile.kind === "pdf" ? (
-              <PdfViewer />
-            ) : viewerFile.kind === "hifi" ? (
-              <PdfViewer external={{ bytes: viewerFile.bytes ?? new ArrayBuffer(0), title: viewerFile.relativePath }} />
-            ) : viewerFile.kind === "image" ? (
-              <ImagePreviewPane />
-            ) : (
-              <OfficePreviewPane />
-            )
-          ) : (
-            <>
-              {activeView === "home" && <HomeView />}
-              {activeView === "library" && <LibraryView />}
-              {activeView === "search" && <SearchView />}
-              {activeView === "tasks" && <TasksView />}
-              {activeView === "history" && <HistoryView />}
-              {activeView === "settings" && <SettingsView />}
-              {placeholderViews[activeView as "graph"] && (
-                <PlaceholderView {...placeholderViews[activeView as "graph"]} />
-              )}
-            </>
-          )}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <TabStrip />
+          <div className="min-h-0 flex-1">
+          {/* 打开的文档：全部保持挂载（显示 / 隐藏切换），保留未保存编辑与滚动位置 */}
+          {tabs.map((tab) => {
+            const active = tab.id === activeTabId;
+            return (
+              <div key={tab.id} className="h-full" style={{ display: active ? "block" : "none" }}>
+                <TabScope tab={tab} active={active}>
+                  <ZoomScope active={active}>
+                    {tab.kind === "editor" ? (
+                      <EditorPane />
+                    ) : tab.kind === "delivery" ? (
+                      <DeliveryView />
+                    ) : tab.kind === "pdf" ? (
+                      <PdfViewer />
+                    ) : tab.kind === "hifi" ? (
+                      <PdfViewer external={{ bytes: tab.bytes ?? new ArrayBuffer(0), title: tab.relativePath }} />
+                    ) : tab.kind === "image" ? (
+                      <ImagePreviewPane />
+                    ) : (
+                      <OfficePreviewPane />
+                    )}
+                  </ZoomScope>
+                </TabScope>
+              </div>
+            );
+          })}
+          <div className="h-full" style={{ display: activeTabId ? "none" : "block" }}>
+            {activeView === "home" && <HomeView />}
+            {activeView === "library" && <LibraryView />}
+            {activeView === "search" && <SearchView />}
+            {activeView === "tasks" && <TasksView />}
+            {activeView === "history" && <HistoryView />}
+            {activeView === "settings" && <SettingsView />}
+            {placeholderViews[activeView as "graph"] && (
+              <PlaceholderView {...placeholderViews[activeView as "graph"]} />
+            )}
+          </div>
+          </div>
         </main>
       </div>
       <StatusBar />

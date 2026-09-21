@@ -34,7 +34,17 @@ interface PromptOptions {
   validate?: (value: string) => string | null;
 }
 
+interface PickOptions {
+  title?: string;
+  message?: string;
+  items: { value: string; label: string; hint?: string }[];
+  defaultValue?: string;
+  confirmText?: string;
+}
+
 interface DialogApi {
+  /** 从列表中选一项；取消返回 null */
+  pick: (options: PickOptions) => Promise<string | null>;
   alert: (message: string, title?: string) => Promise<void>;
   confirm: (options: ConfirmOptions | string) => Promise<boolean>;
   prompt: (options: PromptOptions) => Promise<string | null>;
@@ -43,7 +53,8 @@ interface DialogApi {
 type DialogRequest =
   | { kind: "alert"; title: string; message: string; resolve: () => void }
   | { kind: "confirm"; options: ConfirmOptions; resolve: (ok: boolean) => void }
-  | { kind: "prompt"; options: PromptOptions; resolve: (value: string | null) => void };
+  | { kind: "prompt"; options: PromptOptions; resolve: (value: string | null) => void }
+  | { kind: "pick"; options: PickOptions; resolve: (value: string | null) => void };
 
 const DialogContext = createContext<DialogApi | null>(null);
 
@@ -67,6 +78,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             resolve,
           }),
         ),
+      pick: (options) =>
+        new Promise<string | null>((resolve) => enqueue({ kind: "pick", options, resolve })),
       prompt: (options) =>
         new Promise<string | null>((resolve) => enqueue({ kind: "prompt", options, resolve })),
     }),
@@ -84,7 +97,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 }
 
 function DialogView({ request, onDone }: { request: DialogRequest; onDone: () => void }) {
-  const [value, setValue] = useState(request.kind === "prompt" ? (request.options.defaultValue ?? "") : "");
+  const [value, setValue] = useState(
+    request.kind === "prompt" || request.kind === "pick" ? (request.options.defaultValue ?? "") : "",
+  );
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
@@ -103,6 +118,8 @@ function DialogView({ request, onDone }: { request: DialogRequest; onDone: () =>
       request.resolve();
     } else if (request.kind === "confirm") {
       request.resolve(ok);
+    } else if (request.kind === "pick") {
+      request.resolve(ok && value ? value : null);
     } else {
       if (ok) {
         const msg = request.options.validate?.(value) ?? null;
@@ -121,7 +138,7 @@ function DialogView({ request, onDone }: { request: DialogRequest; onDone: () =>
   const title =
     request.kind === "alert"
       ? request.title
-      : (request.options.title ?? (request.kind === "confirm" ? "请确认" : "输入"));
+      : (request.options.title ?? (request.kind === "confirm" ? "请确认" : request.kind === "pick" ? "请选择" : "输入"));
   const danger = request.kind === "confirm" && request.options.danger;
 
   return (
@@ -146,6 +163,24 @@ function DialogView({ request, onDone }: { request: DialogRequest; onDone: () =>
               <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-gray-500">
                 {request.kind === "alert" ? request.message : request.options.message}
               </p>
+            )}
+            {request.kind === "pick" && (
+              <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+                {request.options.items.map((it) => (
+                  <button
+                    key={it.value}
+                    type="button"
+                    onClick={() => setValue(it.value)}
+                    onDoubleClick={() => finish(true)}
+                    className={`block w-full rounded-lg border px-3 py-2 text-left ${
+                      value === it.value ? "border-primary-500 bg-primary-50" : "border-gray-200 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="block truncate text-sm font-medium text-gray-800">{it.label}</span>
+                    {it.hint && <span className="block truncate text-xs text-gray-400">{it.hint}</span>}
+                  </button>
+                ))}
+              </div>
             )}
             {request.kind === "prompt" && (
               <div className="mt-2">
@@ -190,7 +225,9 @@ function DialogView({ request, onDone }: { request: DialogRequest; onDone: () =>
           >
             {request.kind === "alert"
               ? "知道了"
-              : request.kind === "confirm"
+              : request.kind === "pick"
+                ? (request.options.confirmText ?? "确定")
+                : request.kind === "confirm"
                 ? (request.options.confirmText ?? "确定")
                 : (request.options.confirmText ?? "确定")}
           </button>

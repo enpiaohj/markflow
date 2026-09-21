@@ -9,7 +9,8 @@ import { useZoom, zoomPresets } from "./ZoomContext";
  * 底部状态栏：当前库、索引进度、后台任务与本地优先提示（对应概念图主界面底部）。
  */
 export default function StatusBar() {
-  const { current, scanStatus, requestTasksView } = useLibrary();
+  const { current: activeLib, displayLibrary, scanStatus, requestTasksView } = useLibrary();
+  const current = displayLibrary ?? activeLib;
   const { runningCount } = useTasks();
   const { config, zoomIn, zoomOut, setValue, reset } = useZoom();
   const [presetOpen, setPresetOpen] = useState(false);

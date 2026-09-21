@@ -4,6 +4,7 @@ import * as api from "../lib/api";
 import type { RecentFile } from "../lib/types";
 import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
+import type { LibraryMeta } from "../lib/types";
 import { useZoom } from "./ZoomContext";
 
 /** 编辑器等组件通过该事件响应菜单命令（保存等） */
@@ -46,6 +47,7 @@ function fileName(path: string): string {
 export default function MenuBar() {
   const {
     current,
+    workspace,
     openFile,
     openWizard,
     pickAndOpenFile,
@@ -53,7 +55,6 @@ export default function MenuBar() {
     requestView,
     requestSearchView,
     closeCurrentLibrary,
-    openInEditor,
     viewerFile,
     deliveryOpen,
     closeDocument,
@@ -66,25 +67,38 @@ export default function MenuBar() {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const newDocument = useCallback(async () => {
-    if (!current) {
+    // 多个文档库并列时先选定目标库（用库名区分）；只有一个库则直接使用它
+    let lib: LibraryMeta | null = current && !current.settings?.adhoc ? current : (workspace[0] ?? null);
+    if (workspace.length > 1) {
+      const id = await dialog.pick({
+        title: "新建文档",
+        message: "选择要在哪个文档库中创建",
+        items: workspace.map((l) => ({ value: l.id, label: l.name, hint: l.rootPath })),
+        defaultValue: current?.id,
+        confirmText: "下一步",
+      });
+      if (!id) return;
+      lib = workspace.find((l) => l.id === id) ?? null;
+    }
+    if (!lib) {
       await dialog.alert("请先打开或创建一个文档库，再新建文档。也可以通过「文件 → 打开文件」直接编辑任意文件。");
       return;
     }
     const name = await dialog.prompt({
-      title: "新建文档",
-      label: "文件名（在文档库根目录创建）",
+      title: `新建文档 · ${lib.name}`,
+      label: `文件名（在「${lib.name}」的库根目录创建）`,
       defaultValue: "未命名.md",
       validate: (v) => (v.trim() ? null : "文件名不能为空"),
     });
     if (!name) return;
     try {
       const finalName = /\.[A-Za-z0-9]+$/.test(name.trim()) ? name.trim() : `${name.trim()}.md`;
-      await api.createTextFile(current.id, "", finalName, "");
-      openInEditor(finalName);
+      await api.createTextFile(lib.id, "", finalName, "");
+      await openPath(`${lib.rootPath.replace(/[\\/]+$/, "")}/${finalName}`);
     } catch (err) {
       await dialog.alert(String(err), "新建失败");
     }
-  }, [current, dialog, openInEditor]);
+  }, [current, workspace, dialog, openPath]);
 
   const save = useCallback(() => window.dispatchEvent(new CustomEvent(MENU_SAVE_EVENT)), []);
 

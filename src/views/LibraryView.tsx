@@ -273,7 +273,7 @@ function LibrarySection({
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, switchToLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, openFile, closeFile } = useLibrary();
+  const { current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
@@ -345,7 +345,7 @@ export default function LibraryView() {
       return;
     }
     pendingRef.current = { libId: lib.id, run };
-    void switchToLibrary(lib.id).then(() => {
+    void activateLibrary(lib.id).then(() => {
       // 用户取消（有未保存修改时放弃切换）→ 清掉待办
       if (pendingRef.current?.libId === lib.id && currentIdNow.current !== lib.id) pendingRef.current = null;
     });
@@ -494,7 +494,10 @@ export default function LibraryView() {
       danger: true,
     });
     if (!ok) return;
-    void runOperation(() => api.deleteLibraryEntry(lib.id, entry.relativePath));
+    void runOperation(async () => {
+      await api.deleteLibraryEntry(lib.id, entry.relativePath);
+      await closeTabsForPath(lib.id, entry.relativePath);
+    });
   }
 
   function toggleSort(key: SortKey) {
@@ -895,9 +898,7 @@ export default function LibraryView() {
                   const name = nameInput.trim();
                   void runOperation(async () => {
                     await api.renameLibraryEntry(dialog.lib.id, e2.relativePath, name);
-                    if (current?.id === dialog.lib.id && openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
-                      closeFile();
-                    }
+                    await closeTabsForPath(dialog.lib.id, e2.relativePath);
                   });
                 }}
               />
@@ -930,9 +931,7 @@ export default function LibraryView() {
                     const target = moveTarget;
                     void runOperation(async () => {
                       await api.moveLibraryEntry(dialog.lib.id, e2.relativePath, target);
-                      if (current?.id === dialog.lib.id && openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
-                        closeFile();
-                      }
+                      await closeTabsForPath(dialog.lib.id, e2.relativePath);
                     });
                   }}
                 />
