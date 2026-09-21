@@ -21,14 +21,18 @@ export function setAutosave(on: boolean): void {
 
 const OFFICE_ENGINE_KEY = "mf-pref-office-engine";
 
-/** Office 预览引擎偏好：auto = 有 Microsoft Office / LibreOffice 时优先用它们（默认）；builtin = 始终使用内置渲染 */
+/**
+ * Office 预览引擎偏好：builtin = 始终使用内置渲染（默认：即时显示、不启动 Office、有目录导航）；
+ * auto = 有 Microsoft Office / LibreOffice 时优先用它们导出的精确版式。
+ * 只有用户在设置里明确选过 auto 才使用 auto。
+ */
 export type OfficeEnginePref = "auto" | "builtin";
 
 export function getOfficeEngine(): OfficeEnginePref {
   try {
-    return localStorage.getItem(OFFICE_ENGINE_KEY) === "builtin" ? "builtin" : "auto";
+    return localStorage.getItem(OFFICE_ENGINE_KEY) === "auto" ? "auto" : "builtin";
   } catch {
-    return "auto";
+    return "builtin";
   }
 }
 

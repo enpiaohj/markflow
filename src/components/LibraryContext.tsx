@@ -67,6 +67,8 @@ interface LibraryContextValue {
     bytes?: ArrayBuffer;
     /** 用户主动选择文本快速预览：不再自动切到版式预览 */
     preferText?: boolean;
+    /** 从 Office 版式预览切回内置渲染：本次不再自动调用 Office */
+    forceBuiltin?: boolean;
   } | null;
   openWizard: () => void;
   closeWizard: () => void;
@@ -93,7 +95,7 @@ interface LibraryContextValue {
     relativePath: string,
     kind: "pdf" | "office" | "hifi" | "image",
     bytes?: ArrayBuffer,
-    opts?: { preferText?: boolean },
+    opts?: { preferText?: boolean; forceBuiltin?: boolean },
   ) => void;
   /** 关闭查看器 */
   closeViewer: () => void;
@@ -123,6 +125,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     nonce: number;
     bytes?: ArrayBuffer;
     preferText?: boolean;
+    forceBuiltin?: boolean;
   } | null>(null);
 
   const dialog = useDialog();
@@ -315,14 +318,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   );
 
   const openInViewerGuarded = useCallback(
-    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean }) => {
+    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) => {
       void confirmDiscard().then((ok) => {
         if (!ok) return;
         if (kind !== "hifi" && currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
         setOpenFile(null);
         setDeliveryOpen(false);
         setFocusFile(null);
-        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes, preferText: opts?.preferText });
+        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes, preferText: opts?.preferText, forceBuiltin: opts?.forceBuiltin });
       });
     },
     [confirmDiscard],

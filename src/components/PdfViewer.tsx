@@ -15,7 +15,9 @@ import {
 import { useLibrary } from "./LibraryContext";
 import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
+import { officeKind } from "../lib/format";
 import { useExternalChange } from "../lib/useExternalChange";
+import EngineSwitch from "./office/EngineSwitch";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -460,7 +462,25 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
           >
             {searching ? "搜索中…" : "搜索"}
           </button>
-          {external && (
+          {external && officeKind(rel) !== "excel" && (
+            <EngineSwitch
+              builtin={false}
+              officeLabel="Office 版式"
+              onBuiltin={() => openInViewer(rel, "office", undefined, { forceBuiltin: true })}
+              onOffice={() => {}}
+            />
+          )}
+          {external && officeKind(rel) === "excel" && (
+            <button
+              type="button"
+              onClick={() => openInViewer(rel, "office")}
+              title="回到原生表格视图"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              原生表格
+            </button>
+          )}
+          {external && officeKind(rel) !== "excel" && (
             <button
               type="button"
               onClick={() => openInViewer(rel, "office", undefined, { preferText: true })}

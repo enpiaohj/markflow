@@ -332,16 +332,17 @@ export default function SettingsView() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-medium text-gray-900">Word / PowerPoint 预览引擎</span>
               <span className="block text-xs text-gray-500">
-                自动：装有 Microsoft Office（或 LibreOffice）时用它们导出的精确版式；内置渲染：始终使用内置渲染器（docx-preview / pptx-renderer），
-                即使装了 Office 也不启动它，打开更快、不依赖外部软件，但保真度略低。Excel 始终使用原生表格；「版式预览」按钮仍可手动调用 Office。
+                内置渲染（默认）：使用内置渲染器（docx-preview / pptx-renderer），即时显示、有目录导航，不启动 Office、不依赖外部软件，
+                但保真度略低；自动：装有 Microsoft Office（或 LibreOffice）时优先用它们导出的精确版式（首次需几秒）。
+                Excel 始终使用原生表格；工具栏的「版式预览」按钮在两种模式下都可手动调用 Office。
               </span>
             </span>
           </div>
           <div className="ml-12 mt-2.5 inline-flex rounded-lg border border-gray-200 p-0.5">
             {(
               [
+                { key: "builtin", label: "内置渲染（默认）" },
                 { key: "auto", label: "自动（有 Office 优先）" },
-                { key: "builtin", label: "始终使用内置渲染" },
               ] as const
             ).map(({ key, label }) => (
               <button

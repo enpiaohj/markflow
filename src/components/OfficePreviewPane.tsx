@@ -18,6 +18,7 @@ import { officeKind } from "../lib/format";
 import { getOfficeEngine } from "../lib/prefs";
 import { useExternalChange } from "../lib/useExternalChange";
 import DocxWebView from "./office/DocxWebView";
+import EngineSwitch from "./office/EngineSwitch";
 import PptxViewer from "./office/PptxViewer";
 import PptxWebViewer from "./office/PptxWebViewer";
 import { friendlyOfficeError } from "./office/safeLinks";
@@ -43,6 +44,13 @@ export default function OfficePreviewPane() {
   const [textOnly, setTextOnly] = useState(false);
   // 偏好「始终使用内置渲染」：不自动调用 Office / LibreOffice（手动的「版式预览」按钮仍可用）
   const [preferBuiltin, setPreferBuiltin] = useState(getOfficeEngine() === "builtin");
+  // 本份文档的临时切换（工具栏「内置渲染 / Office 版式」）：null 表示跟随设置；从 Office 版式切回内置时携带 forceBuiltin
+  const [override, setOverride] = useState<boolean | null>(viewerFile?.forceBuiltin ? false : null);
+  const [officeNonce, setOfficeNonce] = useState(0);
+  useEffect(() => {
+    setOverride(viewerFile?.forceBuiltin ? false : null);
+  }, [viewerFile?.nonce, viewerFile?.forceBuiltin]);
+  const builtinNow = override === null ? preferBuiltin : !override;
   useEffect(() => {
     const onPrefs = () => setPreferBuiltin(getOfficeEngine() === "builtin");
     window.addEventListener("markflow:prefs-changed", onPrefs);
@@ -112,17 +120,17 @@ export default function OfficePreviewPane() {
   // 有可用引擎时默认直接显示版式预览（与 Word / Excel / PowerPoint 中一致）；
   // 用户主动选择「文本预览」后不再自动切换。注意：必须在下面的提前 return 之前调用 Hook。
   useEffect(() => {
-    if (!viewerFile || viewerFile.kind !== "office" || viewerFile.preferText || !engine || preferBuiltin) return;
+    if (!viewerFile || viewerFile.kind !== "office" || viewerFile.preferText || !engine || builtinNow) return;
     // Excel 默认使用原生表格网格（不转 PDF）；有 Office 的 PowerPoint 使用逐页图片查看器；
     // 这里对 Word 自动生成版式预览，只有 LibreOffice 时对 PowerPoint 也走 PDF
     const kind = officeKind(viewerFile.relativePath);
     if (kind !== "word" && !(kind === "powerpoint" && engine === "libreoffice")) return;
-    const stamp = viewerFile.nonce * 1000 + reloadNonce;
+    const stamp = viewerFile.nonce * 1000 + reloadNonce * 10 + officeNonce;
     if (autoTriedRef.current === stamp) return;
     autoTriedRef.current = stamp;
     void openHifi(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, viewerFile, reloadNonce, preferBuiltin]);
+  }, [engine, viewerFile, reloadNonce, builtinNow, officeNonce]);
 
   // Word / Excel 等外部程序保存后回到 MarkFlow：重新解析并重新生成版式预览
   useExternalChange(current?.id, rel, () => setReloadNonce((n) => n + 1), !!viewerFile);
@@ -192,10 +200,10 @@ export default function OfficePreviewPane() {
   type Mode = "xlsx" | "docx-web" | "pptx-images" | "pptx-web" | "text" | "detecting";
   let mode: Mode;
   if (kind === "excel") mode = "xlsx";
-  else if ((kind === "word" || kind === "powerpoint") && engine === null && !preferBuiltin) mode = "detecting";
+  else if ((kind === "word" || kind === "powerpoint") && engine === null && !builtinNow) mode = "detecting";
   else if (viewerFile.preferText || textOnly) mode = "text";
   else if (kind === "word") mode = webFail ? "text" : "docx-web";
-  else if (kind === "powerpoint") mode = engine === "office" && !preferBuiltin && !imgFail ? "pptx-images" : webFail ? "text" : "pptx-web";
+  else if (kind === "powerpoint") mode = engine === "office" && !builtinNow && !imgFail ? "pptx-images" : webFail ? "text" : "pptx-web";
   else mode = "text";
   const webFallbackNote = webFail || imgFail;
   const badge =
@@ -240,7 +248,26 @@ export default function OfficePreviewPane() {
               {textOnly || viewerFile.preferText ? (kind === "word" ? "文档视图" : "幻灯片") : kind === "word" ? "纯文本" : "文本大纲"}
             </button>
           )}
-          {engine && !(kind === "powerpoint" && engine === "office" && !preferBuiltin) && (
+          {(kind === "word" || kind === "powerpoint") && engine && (
+            <EngineSwitch
+              builtin={builtinNow}
+              busy={hifiLoading}
+              officeLabel={engine === "office" ? "Office 版式" : "LibreOffice 版式"}
+              onBuiltin={() => {
+                cancelHifi();
+                setTextOnly(false);
+                setOverride(false);
+              }}
+              onOffice={() => {
+                setTextOnly(false);
+                setWebFail("");
+                setImgFail("");
+                setOverride(true);
+                setOfficeNonce((n) => n + 1);
+              }}
+            />
+          )}
+          {engine && kind === "excel" && (
             <button
               type="button"
               onClick={() => void openHifi()}
