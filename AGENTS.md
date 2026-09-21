@@ -58,8 +58,8 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 ## 文档索引
 
 - 产品设计：`docs/产品设计/`
-- 使用指南：`docs/2026-09-21-MarkFlow使用指南-v1.0.md`
-- 开发指南（环境 / 模块职责 / 测试 / 发布流程）：`docs/2026-09-21-MarkFlow开发指南-v1.0.md`
+- 使用指南：`docs/2026-09-21-MarkFlow使用指南-v1.1.md`
+- 开发指南（环境 / 模块职责 / 测试 / 发布流程）：`docs/2026-09-21-MarkFlow开发指南-v1.1.md`
 - 变更记录：`CHANGELOG.md`
 
 ## 版本与发布

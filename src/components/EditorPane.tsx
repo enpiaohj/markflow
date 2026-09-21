@@ -573,14 +573,21 @@ export default function EditorPane() {
   }, [dirty, setEditorDirty]);
 
   // 草稿：未保存内容防抖写入本地存储，崩溃 / 断电后可恢复；保存或放弃后清除
+  const hadDirtyRef = useRef(false);
+  useEffect(() => {
+    hadDirtyRef.current = false;
+  }, [current, rel]);
   useEffect(() => {
     if (!current || !rel || loadState !== "ok") return;
     const key = draftKey(current.id, rel);
     try {
       if (!dirty) {
-        localStorage.removeItem(key);
+        // 仅在「有过未保存修改 → 已保存」时清除草稿；刚载入时不能清，否则崩溃恢复草稿会被抹掉
+        if (hadDirtyRef.current) localStorage.removeItem(key);
+        hadDirtyRef.current = false;
         return;
       }
+      hadDirtyRef.current = true;
       const t = window.setTimeout(() => {
         try {
           localStorage.setItem(key, JSON.stringify({ text: editText, savedAt: Date.now() }));
