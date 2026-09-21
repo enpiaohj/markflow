@@ -6,11 +6,14 @@ import {
   Clock,
   FilePlus2,
   FolderOpen,
+  FolderPlus,
   Import,
+  Pencil,
   Link2,
   Loader2,
   ShieldCheck,
   Star,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -39,6 +42,7 @@ interface TreeCtx {
   toggle: (entry: FileEntry) => void;
   selectedPath: string | null;
   onSelect: (entry: FileEntry) => void;
+  onContextMenu: (entry: FileEntry, x: number, y: number) => void;
 }
 
 function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx: TreeCtx }) {
@@ -52,6 +56,10 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
         type="button"
         onClick={() => ctx.onSelect(entry)}
         onDoubleClick={() => entry.isDir && ctx.toggle(entry)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          ctx.onContextMenu(entry, e.clientX, e.clientY);
+        }}
         title={entry.name}
         className={`flex w-full items-center gap-1 rounded-md py-1.5 pr-2 text-left text-[13px] transition-colors ${
           selected ? "bg-primary-50 text-primary-700" : "text-gray-700 hover:bg-gray-100"
@@ -88,7 +96,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery } = useLibrary();
+  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, openFile, closeFile } = useLibrary();
   const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
@@ -97,6 +105,20 @@ export default function LibraryView() {
   const [list, setList] = useState<FileEntry[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "name", asc: true });
   const [selected, setSelected] = useState<FileEntry | null>(null);
+  /** 右键菜单位置与目标 */
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null);
+  /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动 */
+  const [dialog, setDialog] = useState<
+    | { kind: "new-file"; dir: string }
+    | { kind: "new-folder"; dir: string }
+    | { kind: "rename"; entry: FileEntry }
+    | { kind: "move"; entry: FileEntry }
+    | null
+  >(null);
+  const [dirOptions, setDirOptions] = useState<string[]>([]);
+  const [nameInput, setNameInput] = useState("");
+  const [moveTarget, setMoveTarget] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const loadDir = useCallback(
     async (libraryId: string, dir: string): Promise<FileEntry[]> => {
@@ -210,6 +232,69 @@ export default function LibraryView() {
     }
   }
 
+  // ---- 目录树文件操作（§6.3：冲突校验 + 操作后自动重扫） ----
+
+  function openContext(entry: FileEntry, x: number, y: number) {
+    setSelected(entry);
+    setMenu({ x, y, entry });
+  }
+
+  function openNewFile(dir: string) {
+    setNameInput("新建文档.md");
+    setDialog({ kind: "new-file", dir });
+  }
+
+  function openNewFolder(dir: string) {
+    setNameInput("新建文件夹");
+    setDialog({ kind: "new-folder", dir });
+  }
+
+  function openRename(entry: FileEntry) {
+    setNameInput(entry.name);
+    setDialog({ kind: "rename", entry });
+  }
+
+  async function openMove(entry: FileEntry) {
+    if (!current) return;
+    setDialog({ kind: "move", entry });
+    try {
+      const dirs = await api.listLibraryDirs(current.id);
+      setDirOptions(dirs);
+      setMoveTarget(entry.parentPath);
+    } catch (err) {
+      alert(`加载目录失败：${err}`);
+    }
+  }
+
+  async function runOperation(action: () => Promise<unknown>, successHint?: string) {
+    if (!current) return;
+    setBusy(true);
+    try {
+      await action();
+      setDialog(null);
+      setMenu(null);
+      if (successHint) console.log(successHint);
+    } catch (err) {
+      alert(`操作失败：${err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function confirmDelete(entry: FileEntry) {
+    if (
+      !confirm(
+        `确定删除「${entry.relativePath}」吗？
+
+` +
+          (entry.isDir ? "整个文件夹（含全部内容）将" : "文件将") +
+          "移入系统回收站，可从回收站还原；MarkFlow 索引会自动更新。",
+      )
+    )
+      return;
+    void runOperation(() => api.deleteLibraryEntry(current!.id, entry.relativePath));
+  }
+
   function toggleSort(key: SortKey) {
     setSort((prev) => (prev.key === key ? { key, asc: !prev.asc } : { key, asc: true }));
   }
@@ -254,7 +339,14 @@ export default function LibraryView() {
   const isScanning = scanStatus.phase === "scanning" && scanStatus.libraryId === current.id;
   const scanFailed = scanStatus.phase === "failed" && scanStatus.libraryId === current.id;
   const crumbs = currentDir === "" ? [] : currentDir.split("/");
-  const treeCtx: TreeCtx = { expanded, cache, toggle: (e) => void toggleDir(e), selectedPath: selected?.relativePath ?? null, onSelect: handleSelect };
+  const treeCtx: TreeCtx = {
+    expanded,
+    cache,
+    toggle: (e) => void toggleDir(e),
+    selectedPath: selected?.relativePath ?? null,
+    onSelect: handleSelect,
+    onContextMenu: openContext,
+  };
 
   const sortIcon = (key: SortKey) =>
     sort.key !== key ? null : sort.asc ? (
@@ -285,7 +377,27 @@ export default function LibraryView() {
             </button>
           ))}
         </div>
-        <p className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-gray-400">目录</p>
+        <p className="flex items-center justify-between px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+          目录
+          <span className="flex gap-1">
+            <button
+              type="button"
+              title="在库根目录新建文档"
+              onClick={() => openNewFile("")}
+              className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
+            >
+              <FilePlus2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              title="在库根目录新建文件夹"
+              onClick={() => openNewFolder("")}
+              className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
+            >
+              <FolderPlus className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        </p>
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {treeRoot.map((entry) => (
             <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={treeCtx} />
@@ -326,9 +438,9 @@ export default function LibraryView() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled
-              title="将在后续迭代实现"
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-400"
+              onClick={() => openNewFile(currentDir)}
+              title="在当前目录新建 Markdown 文档"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50"
             >
               <FilePlus2 className="h-3.5 w-3.5" />
               新建文档
@@ -509,6 +621,221 @@ export default function LibraryView() {
           </div>
         )}
       </aside>
+
+      {/* 右键菜单 */}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-50 w-44 rounded-lg border border-gray-200 bg-white py-1 text-[13px] shadow-xl"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            {menu.entry.isDir && (
+              <>
+                <MenuItem icon={<FilePlus2 className="h-3.5 w-3.5" />} label="新建文档"
+                  onClick={() => { const d = menu.entry.relativePath; setMenu(null); openNewFile(d); }} />
+                <MenuItem icon={<FolderPlus className="h-3.5 w-3.5" />} label="新建文件夹"
+                  onClick={() => { const d = menu.entry.relativePath; setMenu(null); openNewFolder(d); }} />
+                <MenuDivider />
+              </>
+            )}
+            <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="重命名"
+              onClick={() => { const e2 = menu.entry; setMenu(null); openRename(e2); }} />
+            <MenuItem icon={<Import className="h-3.5 w-3.5" />} label="移动到…"
+              onClick={() => { const e2 = menu.entry; setMenu(null); void openMove(e2); }} />
+            <MenuDivider />
+            <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="删除（进回收站）" danger
+              onClick={() => { const e2 = menu.entry; setMenu(null); confirmDelete(e2); }} />
+          </div>
+        </>
+      )}
+
+      {/* 操作对话框（新建 / 重命名 / 移动） */}
+      {dialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setDialog(null)}>
+          <div className="w-[420px] rounded-2xl bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            {(dialog.kind === "new-file" || dialog.kind === "new-folder") && (
+              <NameDialog
+                title={dialog.kind === "new-file" ? "新建文档" : "新建文件夹"}
+                location={dialog.dir || "库根目录"}
+                value={nameInput}
+                onChange={setNameInput}
+                okLabel="创建"
+                disabled={!nameInput.trim() || busy}
+                onCancel={() => setDialog(null)}
+                onOk={() => {
+                  const dir = dialog.dir;
+                  const name = nameInput.trim();
+                  void runOperation(async () => {
+                    if (dialog.kind === "new-file") {
+                      await api.createTextFile(current!.id, dir, name, "# 新建文档");
+                      openInEditor(dir ? dir + "/" + name : name);
+                    } else {
+                      await api.createLibraryDirectory(current!.id, dir, name);
+                    }
+                  });
+                }}
+              />
+            )}
+            {dialog.kind === "rename" && (
+              <NameDialog
+                title="重命名"
+                location={dialog.entry.relativePath}
+                value={nameInput}
+                onChange={setNameInput}
+                okLabel="重命名"
+                disabled={!nameInput.trim() || nameInput === dialog.entry.name || busy}
+                onCancel={() => setDialog(null)}
+                onOk={() => {
+                  const e2 = dialog.entry;
+                  const name = nameInput.trim();
+                  void runOperation(async () => {
+                    await api.renameLibraryEntry(current!.id, e2.relativePath, name);
+                    if (openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
+                      closeFile();
+                    }
+                  });
+                }}
+              />
+            )}
+            {dialog.kind === "move" && (
+              <>
+                <h3 className="text-[15px] font-semibold text-gray-900">移动到…</h3>
+                <p className="mt-1 text-xs text-gray-400">{dialog.entry.relativePath}</p>
+                <select
+                  value={moveTarget}
+                  onChange={(e) => setMoveTarget(e.target.value)}
+                  className="mt-4 h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-700 outline-none focus:border-primary-500"
+                >
+                  <option value="">库根目录</option>
+                  {dirOptions
+                    .filter((d) => d !== dialog.entry.relativePath && !d.startsWith(dialog.entry.relativePath + "/"))
+                    .map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                </select>
+                <DialogButtons
+                  onCancel={() => setDialog(null)}
+                  okLabel="移动"
+                  disabled={moveTarget === dialog.entry.parentPath || busy}
+                  onOk={() => {
+                    const e2 = dialog.entry;
+                    const target = moveTarget;
+                    void runOperation(async () => {
+                      await api.moveLibraryEntry(current!.id, e2.relativePath, target);
+                      if (openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
+                        closeFile();
+                      }
+                    });
+                  }}
+                />
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuDivider() {
+  return <div className="my-1 h-px bg-gray-100" />;
+}
+
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  danger,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50 ${
+        danger ? "text-red-600 hover:bg-red-50" : "text-gray-700"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function NameDialog({
+  title,
+  location,
+  value,
+  onChange,
+  okLabel,
+  onCancel,
+  onOk,
+  disabled,
+}: {
+  title: string;
+  location?: string;
+  value: string;
+  onChange: (v: string) => void;
+  okLabel: string;
+  onCancel: () => void;
+  onOk: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <h3 className="text-[15px] font-semibold text-gray-900">
+        {title}
+        {location && <span className="ml-1.5 text-xs font-normal text-gray-400">位置：{location}</span>}
+      </h3>
+      <input
+        autoFocus
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && !disabled && onOk()}
+        className="mt-4 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
+      />
+      <DialogButtons onCancel={onCancel} onOk={onOk} okLabel={okLabel} disabled={disabled} />
+    </>
+  );
+}
+
+function DialogButtons({
+  onCancel,
+  onOk,
+  okLabel,
+  disabled,
+}: {
+  onCancel: () => void;
+  onOk: () => void;
+  okLabel: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="mt-4 flex justify-end gap-2">
+      <button type="button" onClick={onCancel} className="h-8 rounded-lg border border-gray-200 px-3 text-[13px] text-gray-600 hover:bg-gray-50">
+        取消
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onOk}
+        className="h-8 rounded-lg bg-primary-600 px-3 text-[13px] font-medium text-white hover:bg-primary-700 disabled:opacity-40"
+      >
+        {okLabel}
+      </button>
     </div>
   );
 }
