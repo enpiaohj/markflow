@@ -21,6 +21,7 @@ import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
+import { getOfficeEngine } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
 import type { FileEntry } from "../lib/types";
 
@@ -130,6 +131,7 @@ export default function LibraryView() {
   useEffect(() => {
     if (!current || !selected || selected.isDir) return;
     if (selected.format !== "word" && selected.format !== "powerpoint") return;
+    if (getOfficeEngine() === "builtin") return; // 偏好内置渲染时不启动 Office 预热
     const t = window.setTimeout(() => {
       void api.prewarmOfficePreview(current.id, selected.relativePath).catch(() => {});
     }, 700);

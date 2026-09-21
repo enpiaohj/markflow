@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useDialog } from "../components/DialogContext";
 import * as api from "../lib/api";
-import { getAutosave, setAutosave } from "../lib/prefs";
+import { getAutosave, getOfficeEngine, setAutosave, setOfficeEngine, type OfficeEnginePref } from "../lib/prefs";
 import type { AiTestResult, ComponentStatus, ProviderConfig } from "../lib/types";
 
 interface SettingSection {
@@ -38,6 +38,7 @@ const sections: SettingSection[] = [
 export default function SettingsView() {
   const dialog = useDialog();
   const [autosave, setAutosaveState] = useState(getAutosave());
+  const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [components, setComponents] = useState<ComponentStatus[] | null>(null);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -322,6 +323,42 @@ export default function SettingsView() {
               className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${autosave ? "left-[18px]" : "left-0.5"}`}
             />
           </button>
+        </li>
+        <li className="px-4 py-3.5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
+              <Monitor className="h-4.5 w-4.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-gray-900">Word / PowerPoint 预览引擎</span>
+              <span className="block text-xs text-gray-500">
+                自动：装有 Microsoft Office（或 LibreOffice）时用它们导出的精确版式；内置渲染：始终使用内置渲染器（docx-preview / pptx-renderer），
+                即使装了 Office 也不启动它，打开更快、不依赖外部软件，但保真度略低。Excel 始终使用原生表格；「版式预览」按钮仍可手动调用 Office。
+              </span>
+            </span>
+          </div>
+          <div className="ml-12 mt-2.5 inline-flex rounded-lg border border-gray-200 p-0.5">
+            {(
+              [
+                { key: "auto", label: "自动（有 Office 优先）" },
+                { key: "builtin", label: "始终使用内置渲染" },
+              ] as const
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setOfficeEngine(key);
+                  setOfficeEngineState(key);
+                }}
+                className={`rounded-md px-3 py-1 text-xs transition-colors ${
+                  officeEngine === key ? "bg-primary-50 font-medium text-primary-700" : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </li>
         {sections.map(({ name, description, icon: Icon }) => (
           <li
