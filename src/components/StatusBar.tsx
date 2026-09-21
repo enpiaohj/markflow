@@ -1,8 +1,9 @@
-import { Minus, Plus } from "lucide-react";
+import { useState } from "react";
+import { Check, Minus, Plus } from "lucide-react";
 import { AlertCircle, CheckCircle2, ListTodo, Loader2 } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
 import { useTasks } from "./TasksContext";
-import { useZoom } from "./ZoomContext";
+import { useZoom, zoomPresets } from "./ZoomContext";
 
 /**
  * 底部状态栏：当前库、索引进度、后台任务与本地优先提示（对应概念图主界面底部）。
@@ -11,6 +12,7 @@ export default function StatusBar() {
   const { current, scanStatus, requestTasksView } = useLibrary();
   const { runningCount } = useTasks();
   const { config, zoomIn, zoomOut, setValue, reset } = useZoom();
+  const [presetOpen, setPresetOpen] = useState(false);
 
   let scanNode: React.ReactNode;
   if (!current) {
@@ -58,7 +60,7 @@ export default function StatusBar() {
         )}
         <span>v0.3.1</span>
         {config.visible && (
-          <span className="flex items-center gap-1.5" title="缩放（点击百分比复位 100%）">
+          <span className="flex items-center gap-1.5" title="缩放（Ctrl + 滚轮 / Ctrl + + / Ctrl + −）">
             <button
               type="button"
               onClick={zoomOut}
@@ -86,13 +88,38 @@ export default function StatusBar() {
             >
               <Plus className="h-3 w-3" />
             </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="w-10 text-right tabular-nums text-gray-600 hover:text-primary-600"
-            >
-              {Math.round(config.value * 100)}%
-            </button>
+            <span className="relative">
+              <button
+                type="button"
+                onClick={() => setPresetOpen((v) => !v)}
+                onDoubleClick={reset}
+                title="选择缩放比例（双击复位 100%）"
+                className="w-12 rounded px-1 text-right tabular-nums text-gray-600 hover:bg-gray-100 hover:text-primary-600"
+              >
+                {Math.round(config.value * 100)}%
+              </button>
+              {presetOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setPresetOpen(false)} />
+                  <div className="absolute bottom-6 right-0 z-50 w-28 rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                    {zoomPresets(config).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => {
+                          setValue(v);
+                          setPresetOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-1 text-left text-xs text-gray-700 hover:bg-gray-50"
+                      >
+                        <span className="tabular-nums">{Math.round(v * 100)}%</span>
+                        {Math.abs(config.value - v) < 0.005 && <Check className="h-3 w-3 text-primary-600" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </span>
           </span>
         )}
       </div>

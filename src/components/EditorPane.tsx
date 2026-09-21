@@ -25,6 +25,7 @@ import {
   FileCode,
   History,
   Italic,
+  Link2,
   List,
   MessageSquarePlus,
   ListOrdered,
@@ -34,7 +35,7 @@ import {
   Redo2,
   Save,
   Sparkles,
-  Square,
+  Table2,
   TriangleAlert,
   Undo2,
 } from "lucide-react";
@@ -42,14 +43,40 @@ import { Bot, ShieldCheck } from "lucide-react";
 import AiPanel from "./AiPanel";
 import AnnotationsPanel from "./AnnotationsPanel";
 import DiffDialog from "./DiffDialog";
+import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
+import { MENU_SAVE_EVENT } from "./MenuBar";
 import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
+import { getAutosave } from "../lib/prefs";
 import type { CheckIssue } from "../lib/types";
 import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
 import type { FileEntry, VersionInfo } from "../lib/types";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
+
+/** 拆出 Front Matter：可视化编辑器不理解它，编辑正文时原样保护、保存时拼回。 */
+function splitFrontMatter(text: string): { front: string; body: string } {
+  const m = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  return m ? { front: m[0], body: text.slice(m[0].length) } : { front: "", body: text };
+}
+
+/** 可视化模式无法无损往返的 Markdown 语法（切换前提示，避免静默改写 / 丢失）。 */
+function detectVisualRisks(body: string): string[] {
+  const noCode = body.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+  const risks: string[] = [];
+  if (/<\/?[a-zA-Z][^>]*>/.test(noCode)) risks.push("HTML 标签");
+  if (/<!--/.test(noCode)) risks.push("HTML 注释");
+  if (/\[\^[^\]\s]+\]/.test(noCode)) risks.push("脚注");
+  if (/\[\[[^\]]+\]\]/.test(noCode)) risks.push("Wiki 链接");
+  if (/\$\$[\s\S]+?\$\$/.test(noCode)) risks.push("数学公式");
+  if (/```mermaid/.test(body)) risks.push("Mermaid 图表");
+  if (/^>\s*\[![A-Za-z]+\]/m.test(noCode)) risks.push("Callout 提示块");
+  return risks;
+}
+
+/** 草稿键：崩溃 / 断电后的恢复依据（存于 WebView 本地存储，不写入文档库）。 */
+const draftKey = (libraryId: string, rel: string) => `mf-draft:${libraryId}:${rel}`;
 
 // ---------------------------------------------------------------------------
 // 可视化编辑器（Tiptap / ProseMirror，Markdown 为持久化真源）
@@ -67,6 +94,22 @@ function VisualEditor({
   registerSelection: (fn: () => string) => void;
 }) {
   const { config: zoomConfig } = useZoom();
+  const dialog = useDialog();
+  async function onLink(ed: NonNullable<ReturnType<typeof useEditor>>) {
+    const previous = (ed.getAttributes("link").href as string | undefined) ?? "";
+    const url = await dialog.prompt({
+      title: "链接",
+      label: "链接地址（留空并确定可移除链接）",
+      defaultValue: previous,
+      placeholder: "https://",
+    });
+    if (url === null) return;
+    if (url.trim() === "") {
+      ed.chain().focus().extendMarkRange("link").unsetLink().run();
+    } else {
+      ed.chain().focus().extendMarkRange("link").setLink({ href: url.trim() }).run();
+    }
+  }
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -130,9 +173,13 @@ function VisualEditor({
         <button type="button" className={btn(editor.isActive("codeBlock"))} title="代码块"
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}><Code2 className="h-3.5 w-3.5" /></button>
         <span className="mx-1 h-4 w-px bg-gray-200" />
-        <button type="button" className={btn(false)} title="插入表格"
+        <button type="button" className={btn(false)} title="插入表格（3×3）"
           onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>
-          <Square className="h-3 w-3" />
+          <Table2 className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className={btn(editor.isActive("link"))} title="插入 / 编辑链接"
+          onClick={() => void onLink(editor)}>
+          <Link2 className="h-3.5 w-3.5" />
         </button>
         <span className="mx-1 h-4 w-px bg-gray-200" />
         <button type="button" className={btn(false)} title="撤销"
@@ -230,8 +277,12 @@ function SourceEditor({
 // ---------------------------------------------------------------------------
 
 export default function EditorPane() {
-  const { current, openFile, closeFile, setEditorDirty } = useLibrary();
+  const { current, openFile, closeFile, setEditorDirty, confirmDiscard } = useLibrary();
   const { configure: configureZoom } = useZoom();
+  const dialog = useDialog();
+  const [encoding, setEncoding] = useState("UTF-8");
+  const [risks, setRisks] = useState<string[]>([]);
+  const [externalChanged, setExternalChanged] = useState(false);
   const [entry, setEntry] = useState<FileEntry | null>(null);
   const [savedText, setSavedText] = useState("");
   const [baseMtime, setBaseMtime] = useState(0);
@@ -251,17 +302,48 @@ export default function EditorPane() {
   const [checking, setChecking] = useState(false);
   const [diff, setDiff] = useState<{ original: string; polished: string; loading: boolean } | null>(null);
   const [aiProviderId, setAiProviderId] = useState<string | null>(null);
+  const [aiProviderLabel, setAiProviderLabel] = useState("");
+  const [autosave, setAutosaveOn] = useState(getAutosave());
 
   useEffect(() => {
     void api.aiListProviders().then((list) => {
       setAiProviderId(list[0]?.id ?? null);
+      if (list[0]) {
+        let host = list[0].baseUrl;
+        try {
+          host = new URL(list[0].baseUrl).host;
+        } catch {
+          /* 保持原样 */
+        }
+        setAiProviderLabel(`${list[0].name} · ${list[0].model}（${host}）`);
+      }
     });
   }, [openFile]);
+
+  useEffect(() => {
+    const onPrefs = () => setAutosaveOn(getAutosave());
+    window.addEventListener("markflow:prefs-changed", onPrefs);
+    return () => window.removeEventListener("markflow:prefs-changed", onPrefs);
+  }, []);
+
+  /** AI 润色前明确告知去向：整篇文档将发送给哪个 Provider */
+  async function startPolish() {
+    if (!aiProviderId) {
+      await dialog.alert("尚未配置 AI Provider，请在「设置 → AI」中添加。");
+      return;
+    }
+    const ok = await dialog.confirm({
+      title: "AI 润色",
+      message: `将把当前文档全文（约 ${editText.replace(/\s/g, "").length.toLocaleString()} 字符）发送到：\n${aiProviderLabel}\n\n发送前会扫描敏感信息；润色结果会先进入差异审阅，不会直接覆盖文档。`,
+      confirmText: "发送并润色",
+    });
+    if (ok) await runPolish(false);
+  }
 
   const rel = openFile?.relativePath ?? "";
 
   useEffect(() => {
-    configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1 });
+    configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1, presets: [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5] });
     return () => configureZoom({ visible: false });
   }, [configureZoom, openFile]);
 
@@ -274,6 +356,7 @@ export default function EditorPane() {
     setConflict(null);
     setShowHistory(false);
     setVersions(null);
+    setExternalChanged(false);
     api
       .getFileDetail(current.id, openFile.relativePath)
       .then((detail) => {
@@ -288,7 +371,11 @@ export default function EditorPane() {
           setSavedText(file.content);
           setEditText(file.content);
           setBaseMtime(file.baseMtime);
-          setMode(detail.format === "markdown" ? "visual" : "source");
+          setEncoding(file.encoding);
+          const found = detail.format === "markdown" ? detectVisualRisks(splitFrontMatter(file.content).body) : [];
+          setRisks(found);
+          // 含无法无损往返的语法时默认进入源码模式，避免可视化编辑静默改写文档
+          setMode(detail.format === "markdown" && found.length === 0 ? "visual" : "source");
           setModeEpoch((n) => n + 1);
           setSaveState("saved");
           setLoadState("ok");
@@ -316,6 +403,7 @@ export default function EditorPane() {
         setBaseMtime(out.mtime);
         setSaveState("saved");
         setConflict(null);
+        setExternalChanged(false);
       } catch (err) {
         const message = String(err);
         if (message.startsWith("FILE_CONFLICT")) {
@@ -338,13 +426,33 @@ export default function EditorPane() {
         if (dirty) void doSave(false);
       }
     };
+    const onMenuSave = () => {
+      if (dirty) void doSave(false);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(MENU_SAVE_EVENT, onMenuSave);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(MENU_SAVE_EVENT, onMenuSave);
+    };
   }, [saveState, doSave]);
 
-  // 切换模式时同步文本来源
-  function switchMode(next: "visual" | "source") {
+  // 切换模式时同步文本来源；切到可视化前提示无法无损保留的语法
+  async function switchMode(next: "visual" | "source") {
     if (next === mode) return;
+    if (next === "visual") {
+      const found = detectVisualRisks(splitFrontMatter(editText).body);
+      setRisks(found);
+      if (found.length > 0) {
+        const ok = await dialog.confirm({
+          title: "可视化模式可能改写文档",
+          message: `文档包含可视化编辑器无法无损保留的语法：${found.join("、")}。\n继续编辑后保存，这些内容可能被改写或丢失。建议使用源码模式。`,
+          confirmText: "仍然切换",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+    }
     setMode(next);
     setModeEpoch((n) => n + 1);
   }
@@ -357,6 +465,8 @@ export default function EditorPane() {
       setSavedText(file.content);
       setEditText(file.content);
       setBaseMtime(file.baseMtime);
+      setEncoding(file.encoding);
+      setExternalChanged(false);
       setModeEpoch((n) => n + 1);
       setSaveState("saved");
     } catch (err) {
@@ -371,7 +481,13 @@ export default function EditorPane() {
   }
 
   async function restoreVersion(v: VersionInfo) {
-    if (!current || !confirm("恢复到该历史版本？\n\n当前内容会先自动保存为新的历史快照，可再次恢复回来。")) return;
+    if (!current) return;
+    const ok = await dialog.confirm({
+      title: "恢复历史版本",
+      message: "恢复到该历史版本？\n\n当前内容会先自动保存为新的历史快照，可再次恢复回来。",
+      confirmText: "恢复",
+    });
+    if (!ok) return;
     try {
       await api.restoreFileVersion(current.id, rel, v.id);
       await reloadFromDisk();
@@ -388,7 +504,7 @@ export default function EditorPane() {
     try {
       setIssues(await api.checkDocument(current.id, rel));
     } catch (err) {
-      alert(`检查失败：${err}`);
+      await dialog.alert(`检查失败：${err}`);
     } finally {
       setChecking(false);
     }
@@ -405,7 +521,7 @@ export default function EditorPane() {
         {
           providerId: aiProviderId ?? "",
           libraryId: current.id,
-          contextPaths: [rel],
+          contextPaths: [],
           allowSensitive,
           messages: [
             {
@@ -423,7 +539,7 @@ export default function EditorPane() {
         },
       );
       if (!polished.trim()) {
-        alert("AI 未返回内容，请检查 Provider 配置或稍后重试。");
+        await dialog.alert("AI 未返回内容，请检查 Provider 配置或稍后重试。");
         setDiff(null);
         return;
       }
@@ -432,13 +548,17 @@ export default function EditorPane() {
       const message = String(err);
       setDiff(null);
       if (message.startsWith("SENSITIVE::")) {
-        if (confirm("当前文档包含疑似敏感信息（详见「检查」面板）。\n确认将其发送给 AI Provider 进行润色吗？")) {
-          await runPolish(true);
-        }
+        const ok = await dialog.confirm({
+          title: "疑似敏感信息",
+          message: "当前文档包含疑似敏感信息（详见「检查」面板）。\n确认将其发送给 AI Provider 进行润色吗？",
+          confirmText: "知情并发送",
+          danger: true,
+        });
+        if (ok) await runPolish(true);
       } else if (message.includes("Provider 不存在")) {
-        alert("尚未配置 AI Provider，请在「设置 → AI」中添加。");
+        await dialog.alert("尚未配置 AI Provider，请在「设置 → AI」中添加。");
       } else {
-        alert(message);
+        await dialog.alert(message);
       }
     }
   }
@@ -451,6 +571,117 @@ export default function EditorPane() {
     setEditorDirty(dirty);
     return () => setEditorDirty(false);
   }, [dirty, setEditorDirty]);
+
+  // 草稿：未保存内容防抖写入本地存储，崩溃 / 断电后可恢复；保存或放弃后清除
+  const hadDirtyRef = useRef(false);
+  useEffect(() => {
+    hadDirtyRef.current = false;
+  }, [current, rel]);
+  useEffect(() => {
+    if (!current || !rel || loadState !== "ok") return;
+    const key = draftKey(current.id, rel);
+    try {
+      if (!dirty) {
+        // 仅在「有过未保存修改 → 已保存」时清除草稿；刚载入时不能清，否则崩溃恢复草稿会被抹掉
+        if (hadDirtyRef.current) localStorage.removeItem(key);
+        hadDirtyRef.current = false;
+        return;
+      }
+      hadDirtyRef.current = true;
+      const t = window.setTimeout(() => {
+        try {
+          localStorage.setItem(key, JSON.stringify({ text: editText, savedAt: Date.now() }));
+        } catch {
+          /* 存储不可用时忽略 */
+        }
+      }, 800);
+      return () => window.clearTimeout(t);
+    } catch {
+      /* 存储不可用时忽略 */
+    }
+  }, [current, rel, loadState, dirty, editText]);
+
+  useEffect(() => {
+    if (!current || !rel) return;
+    const key = draftKey(current.id, rel);
+    const onDiscard = () => {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("markflow:discard-draft", onDiscard);
+    return () => window.removeEventListener("markflow:discard-draft", onDiscard);
+  }, [current, rel]);
+
+  // 自动保存（设置中开启）：停止输入 3 秒后保存；有冲突 / 外部修改时不自动覆盖
+  useEffect(() => {
+    if (!autosave || !dirty || loadState !== "ok" || saveState === "saving" || conflict || externalChanged) return;
+    const t = window.setTimeout(() => void doSave(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [autosave, dirty, editText, loadState, saveState, conflict, externalChanged, doSave]);
+
+  // 载入完成后检查是否有可恢复的草稿
+  useEffect(() => {
+    if (!current || !rel || loadState !== "ok") return;
+    const key = draftKey(current.id, rel);
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw) as { text: string; savedAt: number };
+      if (draft.text === savedText) {
+        localStorage.removeItem(key);
+        return;
+      }
+      void dialog
+        .confirm({
+          title: "发现未保存的草稿",
+          message: `检测到该文件在 ${formatTime(draft.savedAt)} 有未保存的编辑内容（可能因异常退出而丢失）。\n是否恢复？`,
+          confirmText: "恢复草稿",
+          cancelText: "丢弃草稿",
+        })
+        .then((ok) => {
+          if (ok) {
+            setEditText(draft.text);
+            setModeEpoch((n) => n + 1);
+          } else {
+            try {
+              localStorage.removeItem(key);
+            } catch {
+              /* ignore */
+            }
+          }
+        });
+    } catch {
+      /* 草稿损坏则忽略 */
+    }
+    // 仅在文件载入完成时检查一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, rel, loadState]);
+
+  // 窗口重新获得焦点时检查外部修改（Word / Excel / 其他编辑器保存后回到 MarkFlow）
+  useEffect(() => {
+    if (!current || !rel || loadState !== "ok") return;
+    const onFocus = () => {
+      void api
+        .statFileMtime(current.id, rel)
+        .then((mtime) => {
+          if (mtime === baseMtime || mtime === 0) return;
+          if (!dirty) void reloadFromDisk();
+          else setExternalChanged(true);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, rel, loadState, baseMtime, dirty]);
   // 展示状态：保存中/失败优先，其后由「文本是否变化」驱动
   const displayState: SaveState =
     saveState === "saving" ? "saving" : saveState === "error" ? "error" : dirty ? "dirty" : "saved";
@@ -463,7 +694,7 @@ export default function EditorPane() {
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3">
         <button
           type="button"
-          onClick={closeFile}
+          onClick={() => void confirmDiscard().then((ok) => ok && closeFile())}
           title="关闭并返回文档库"
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-gray-500 hover:bg-gray-100"
         >
@@ -485,7 +716,7 @@ export default function EditorPane() {
               <button
                 key={key}
                 type="button"
-                onClick={() => switchMode(key)}
+                onClick={() => void switchMode(key)}
                 className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${
                   mode === key ? "bg-primary-50 text-primary-700" : "text-gray-500 hover:bg-gray-50"
                 }`}
@@ -639,6 +870,25 @@ export default function EditorPane() {
         </div>
       )}
 
+      {externalChanged && (
+        <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">该文件已被外部程序修改，而你有未保存的编辑。</span>
+          <button type="button" onClick={() => void reloadFromDisk()} className="rounded border border-amber-300 px-2 py-0.5 hover:bg-amber-100">
+            放弃我的修改，载入外部版本
+          </button>
+          <button type="button" onClick={() => setExternalChanged(false)} className="rounded px-2 py-0.5 text-amber-600 hover:bg-amber-100">
+            保留我的修改
+          </button>
+        </div>
+      )}
+
+      {mode === "source" && risks.length > 0 && entry?.format === "markdown" && (
+        <div className="border-b border-sky-100 bg-sky-50 px-4 py-1.5 text-[11px] text-sky-700">
+          文档包含 {risks.join("、")}，可视化模式无法无损保留，已默认使用源码模式。
+        </div>
+      )}
+
       {/* 冲突处理对话框（设计文档 §14：比较、重新载入、另存、合并的 v0.2 子集） */}
       {conflict && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
@@ -732,6 +982,13 @@ export default function EditorPane() {
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-gray-400">
           <TriangleAlert className="h-7 w-7" />
           <p className="mt-3 max-w-md text-center text-sm leading-relaxed text-gray-500">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => current && void api.openPathInSystem(current.id, rel).catch((e) => dialog.alert(String(e)))}
+            className="mt-4 h-8 rounded-lg border border-gray-200 px-3 text-[13px] text-gray-600 hover:bg-gray-50"
+          >
+            使用系统应用打开
+          </button>
         </div>
       )}
       {loadState === "ok" && (
@@ -739,9 +996,9 @@ export default function EditorPane() {
           {mode === "visual" ? (
             <VisualEditor
               key={`v-${modeEpoch}`}
-              initial={savedText}
-              onChange={setEditText}
-              onPolish={() => void runPolish(false)}
+              initial={splitFrontMatter(editText).body}
+              onChange={(md) => setEditText(splitFrontMatter(editText).front + md)}
+              onPolish={() => void startPolish()}
               registerSelection={(fn) => (selectionFnRef.current = fn)}
             />
           ) : (
@@ -755,6 +1012,15 @@ export default function EditorPane() {
           )}
         </div>
       )}
+          {loadState === "ok" && (
+            <div className="flex h-6 shrink-0 items-center gap-3 border-t border-gray-200 bg-white px-4 text-[11px] text-gray-500">
+              <span>{editText.replace(/\s/g, "").length.toLocaleString()} 个字符</span>
+              <span>{(editText.match(/\n/g)?.length ?? 0) + 1} 行</span>
+              <span className={encoding === "UTF-8" ? "" : "font-medium text-amber-600"} title="保存时按原编码写回，不会改变文件编码">
+                编码 {encoding}
+              </span>
+            </div>
+          )}
         </div>
         {sidePanel && (
           <aside className="w-96 shrink-0 border-l border-gray-200">

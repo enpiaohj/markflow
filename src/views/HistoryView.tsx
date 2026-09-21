@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { FolderOpen, History, Loader2, Undo2 } from "lucide-react";
+import { useDialog } from "../components/DialogContext";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { formatSize, formatTime } from "../lib/format";
@@ -11,6 +12,7 @@ import type { VersionInfo } from "../lib/types";
  */
 export default function HistoryView() {
   const { current, contentVersion } = useLibrary();
+  const dialog = useDialog();
   const [versions, setVersions] = useState<VersionInfo[] | null>(null);
   const [restoring, setRestoring] = useState<number | null>(null);
 
@@ -31,18 +33,18 @@ export default function HistoryView() {
 
   async function restore(v: VersionInfo) {
     if (!current || v.relativePath === null) return;
-    if (
-      !confirm(
-        `恢复「${v.relativePath}」到 ${formatTime(v.createdAt)} 的版本？\n\n当前内容会先自动保存为新的快照，可再次恢复回来。`,
-      )
-    )
-      return;
+    const ok = await dialog.confirm({
+      title: "恢复历史版本",
+      message: `恢复「${v.relativePath}」到 ${formatTime(v.createdAt)} 的版本？\n\n当前内容会先自动保存为新的快照，可再次恢复回来。`,
+      confirmText: "恢复",
+    });
+    if (!ok) return;
     setRestoring(v.id);
     try {
       await api.restoreFileVersion(current.id, v.relativePath, v.id);
       await reload();
     } catch (err) {
-      alert(`恢复失败：${err}`);
+      await dialog.alert(`恢复失败：${err}`, "恢复失败");
     } finally {
       setRestoring(null);
     }

@@ -5,17 +5,23 @@
 
 use std::path::{Path, PathBuf};
 
-/// 名称合法性：非空、无路径分隔符、无连续点号、不以点号开头（隐藏项不纳入索引）。
+/// 名称合法性（Windows 规则）：非空、首尾无空白、无路径分隔符与非法字符、无连续点号、
+/// 不以点号开头/结尾（点号开头的隐藏项不会纳入索引）、非保留设备名（含带扩展名形式）。
 pub fn validate_name(name: &str) -> Result<(), String> {
-    let name = name.trim();
-    if name.is_empty() {
+    if name.trim().is_empty() {
         return Err("名称不能为空".into());
     }
     if name != name.trim() {
         return Err("名称首尾不能包含空白字符".into());
     }
+    if name.chars().count() > 200 {
+        return Err("名称过长（上限 200 个字符）".into());
+    }
     if name.contains('/') || name.contains('\\') {
         return Err("名称不能包含路径分隔符 / 或 \\".into());
+    }
+    if let Some(c) = name.chars().find(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || c.is_control()) {
+        return Err(format!("名称不能包含字符「{c}」（Windows 不允许 < > : \" | ? * 与控制字符）"));
     }
     if name.contains("..") {
         return Err("名称不能包含连续点号".into());
@@ -23,10 +29,17 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     if name.starts_with('.') {
         return Err("名称不能以点号开头（点号开头的隐藏项不会纳入索引）".into());
     }
-    for reserved in ["con", "prn", "aux", "nul"] {
-        if name.to_ascii_lowercase() == reserved {
-            return Err(format!("「{name}」是 Windows 保留名称"));
-        }
+    if name.ends_with('.') {
+        return Err("名称不能以点号结尾（Windows 会自动去掉结尾点号）".into());
+    }
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_lowercase();
+    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ((stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0');
+    if reserved {
+        return Err(format!("「{name}」使用了 Windows 保留设备名"));
     }
     Ok(())
 }
@@ -140,6 +153,13 @@ mod tests {
         assert!(validate_name(".git").is_err());
         assert!(validate_name("  ").is_err());
         assert!(validate_name("con").is_err());
+        assert!(validate_name("con.txt").is_err());
+        assert!(validate_name("COM1.md").is_err());
+        assert!(validate_name("com0.md").is_ok());
+        assert!(validate_name("a?.md").is_err());
+        assert!(validate_name("a:b").is_err());
+        assert!(validate_name("尾部点.").is_err());
+        assert!(validate_name(" 前导空格.md").is_err());
     }
 
     #[test]

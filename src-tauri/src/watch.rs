@@ -57,6 +57,9 @@ pub fn start_watching(
     }
 
     let meta = library::get_library(conn, &library_id)?;
+    if crate::openfile::is_adhoc_library(&meta) {
+        return Ok(()); // 单文件模式不监听整个文件夹（外部修改由窗口聚焦时检测）
+    }
     let root = std::path::PathBuf::from(&meta.root_path);
     if !root.is_dir() {
         return Err(format!("文档库文件夹不存在，停止监听: {}", meta.root_path));
@@ -66,7 +69,10 @@ pub fn start_watching(
     let mut watcher: RecommendedWatcher =
         notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
-                let relevant = event.paths.iter().any(|p| !is_ignored_path(p));
+                let relevant = event
+                    .paths
+                    .iter()
+                    .any(|p| !is_ignored_path(p) && !crate::selfwrite::is_recent(p));
                 if relevant {
                     let _ = tx.send(());
                 }
@@ -118,10 +124,9 @@ pub fn stop_watching(slot: &Mutex<Option<WatchSession>>) {
 
 /// 防抖到期：登记任务 → 重扫当前库 → 发送变更事件。
 fn rescan_current(app: &AppHandle, library_id: &str) {
-    let state = app.state::<AppState>();
+    let state = app.state::<AppState>().inner().clone();
     let tasks = app.state::<crate::tasks::TaskManager>();
-    let conn = state.0.lock().unwrap();
-    let Ok(meta) = library::get_library(&conn, library_id) else {
+    let Ok(meta) = library::get_library(&state.0.lock().unwrap(), library_id) else {
         return;
     };
     let exclude = library::excludes_from(&meta.settings);
@@ -138,8 +143,8 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
     let progress = |processed: u64| {
         mgr.progress(&task_id, processed);
     };
-    match library::scan_library_with(
-        &conn,
+    match library::scan_library_locked(
+        &state,
         library_id,
         &root,
         &exclude,
@@ -152,7 +157,6 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
                 Some(format!("{} 个文件 · {} 项跳过", outcome.file_count, outcome.skipped)),
                 None,
             );
-            drop(conn);
             let _ = app.emit(
                 "library:changed",
                 serde_json::json!({
@@ -167,7 +171,6 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
         }
         Err(err) => {
             mgr.finish(&task_id, crate::tasks::TaskStatus::Failed, None, Some(err.clone()));
-            drop(conn);
             let _ = app.emit(
                 "library:rescan_failed",
                 serde_json::json!({ "libraryId": library_id, "error": err }),

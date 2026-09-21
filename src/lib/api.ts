@@ -15,6 +15,9 @@ import type {
   ProviderSaveRequest,
   DeliveryRecord,
   OfficePreview,
+  AiChatOutcome,
+  OpenTarget,
+  RecentFile,
   LibraryMeta,
   QuickScanResult,
   SaveOutcome,
@@ -23,6 +26,25 @@ import type {
   TextFileContent,
   VersionInfo,
 } from "./types";
+
+/** 打开任意文件：定位所属文档库，或进入单文件模式 */
+export function openFilePath(path: string): Promise<OpenTarget> {
+  return invoke("open_file_path", { path });
+}
+
+/** 取走启动参数 / 二次启动传来的待打开文件 */
+export function takePendingOpenPaths(): Promise<string[]> {
+  return invoke("take_pending_open_paths");
+}
+
+export function listRecentFiles(): Promise<RecentFile[]> {
+  return invoke("list_recent_files");
+}
+
+/** 文件当前磁盘 mtime（窗口聚焦时检测外部修改） */
+export function statFileMtime(libraryId: string, relativePath: string): Promise<number> {
+  return invoke("stat_file_mtime", { libraryId, relativePath });
+}
 
 export function appInfo(): Promise<{ name: string; version: string }> {
   return invoke("app_info");
@@ -173,6 +195,14 @@ export function aiSaveProvider(request: ProviderSaveRequest): Promise<ProviderCo
   return invoke("ai_save_provider", { request });
 }
 
+export function aiUpdateProvider(id: string, request: ProviderSaveRequest): Promise<ProviderConfig> {
+  return invoke("ai_update_provider", { id, request });
+}
+
+export function aiCancel(): Promise<void> {
+  return invoke("ai_cancel");
+}
+
 export function aiDeleteProvider(id: string): Promise<void> {
   return invoke("ai_delete_provider", { id });
 }
@@ -189,7 +219,7 @@ export function aiPrepareContext(libraryId: string, contextPaths: string[]): Pro
 export async function aiChat(
   request: AiChatRequest,
   onChunk: (text: string) => void,
-): Promise<{ model: string; sensitiveHitCount: number }> {
+): Promise<AiChatOutcome> {
   const { Channel } = await import("@tauri-apps/api/core");
   const channel = new Channel<string>();
   channel.onmessage = onChunk;

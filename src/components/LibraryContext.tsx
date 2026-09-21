@@ -4,12 +4,17 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../lib/api";
+import { openRouteFor } from "../lib/format";
 import type { LibraryMeta } from "../lib/types";
+import { useDialog } from "./DialogContext";
 
 export type ScanPhase = "idle" | "scanning" | "done" | "failed";
 
@@ -21,7 +26,7 @@ export interface ScanStatus {
 }
 
 /** 主视图切换请求：Shell 监听 nonce 变化后切换到 target 视图 */
-export type ViewRequestTarget = "library" | "search" | "tasks";
+export type ViewRequestTarget = "home" | "library" | "search" | "graph" | "tasks" | "history" | "settings";
 
 interface LibraryContextValue {
   /** 索引数据库中的全部文档库（按最近打开排序） */
@@ -34,6 +39,12 @@ interface LibraryContextValue {
   wizardOpen: boolean;
   /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
   viewRequest: { target: ViewRequestTarget; nonce: number };
+  /** 编辑器中有未保存修改时弹出确认；返回 true 表示可以继续（已放弃修改或无修改） */
+  confirmDiscard: () => Promise<boolean>;
+  /** 打开任意文件（库内定位 / 单文件模式），按格式路由到编辑器或查看器 */
+  openPath: (path: string) => Promise<void>;
+  /** 弹出系统文件选择框并打开所选文件 */
+  pickAndOpenFile: () => Promise<void>;
   /** 内容版本号：文件监听重扫 / 扫描完成后自增，驱动文档库视图刷新 */
   contentVersion: number;
   /** 搜索结果点击后的聚焦请求：文档库视图跳转并选中该文件 */
@@ -56,6 +67,8 @@ interface LibraryContextValue {
   openWizard: () => void;
   closeWizard: () => void;
   requestSearchView: () => void;
+  /** 请求切换到任意一级视图（菜单栏使用） */
+  requestView: (target: ViewRequestTarget) => void;
   requestTasksView: () => void;
   /** 打开（切换到）指定文档库并刷新列表 */
   switchToLibrary: (id: string) => Promise<void>;
@@ -101,6 +114,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     nonce: number;
     bytes?: ArrayBuffer;
   } | null>(null);
+
+  const dialog = useDialog();
+  const dirtyRef = useRef(false);
+  dirtyRef.current = editorDirty;
+
+  const confirmDiscard = useCallback(async () => {
+    if (!dirtyRef.current) return true;
+    const ok = await dialog.confirm({
+      title: "放弃未保存的修改？",
+      message: "当前文档有未保存的修改，继续操作将丢失这些修改。",
+      confirmText: "放弃修改",
+      danger: true,
+    });
+    if (ok) window.dispatchEvent(new CustomEvent("markflow:discard-draft"));
+    return ok;
+  }, [dialog]);
 
   const refreshLibraries = useCallback(async () => {
     try {
@@ -166,7 +195,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshLibraries]);
 
-  const switchToLibrary = useCallback(async (id: string) => {
+  const switchLibraryCore = useCallback(async (id: string, navigate: boolean) => {
     const meta = await api.openLibrary(id);
     setOpenFile(null);
     setViewerFile(null);
@@ -179,13 +208,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       error: null,
     });
     setFocusFile(null);
-    setViewRequest({ target: "library", nonce: Date.now() });
-    // 重新打开库时刷新索引（闭库期间的磁盘变化）并恢复监听
+    if (navigate) setViewRequest({ target: "library", nonce: Date.now() });
+    // 重新打开库时刷新索引（闭库期间的磁盘变化）并恢复监听；单文件模式的隐式库只索引已打开的文件
     api.rescanLibrary(id).catch((err) => console.error("重扫失败", err));
     api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
   }, []);
 
+  const switchToLibrary = useCallback(
+    async (id: string) => {
+      if (!(await confirmDiscard())) return;
+      await switchLibraryCore(id, true);
+    },
+    [confirmDiscard, switchLibraryCore],
+  );
+
   const libraryCreated = useCallback(async (id: string) => {
+    if (!(await confirmDiscard())) return;
     setWizardOpen(false);
     const meta = await api.openLibrary(id);
     setLibraries((prev) => [meta, ...prev.filter((l) => l.id !== id)]);
@@ -197,10 +235,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setFocusFile(null);
     setViewRequest({ target: "library", nonce: Date.now() });
     api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
-  }, []);
+  }, [confirmDiscard]);
 
   const removeLibrary = useCallback(
     async (id: string) => {
+      if (current?.id === id && !(await confirmDiscard())) return;
       await api.removeLibrary(id);
       if (current?.id === id) {
         setOpenFile(null);
@@ -212,8 +251,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       }
       await refreshLibraries();
     },
-    [current, refreshLibraries],
+    [current, refreshLibraries, confirmDiscard],
   );
+
+  const requestView = useCallback((target: ViewRequestTarget) => {
+    setViewRequest({ target, nonce: Date.now() });
+  }, []);
 
   const requestSearchView = useCallback(() => {
     setViewRequest({ target: "search", nonce: Date.now() });
@@ -223,11 +266,109 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setViewRequest({ target: "tasks", nonce: Date.now() });
   }, []);
 
-  const requestFocusFile = useCallback((relativePath: string) => {
-    setOpenFile(null);
-    setViewerFile(null);
-    setFocusFile({ relativePath, nonce: Date.now() });
-    setViewRequest({ target: "library", nonce: Date.now() });
+  const requestFocusFile = useCallback(
+    (relativePath: string) => {
+      void confirmDiscard().then((ok) => {
+        if (!ok) return;
+        setOpenFile(null);
+        setViewerFile(null);
+        setFocusFile({ relativePath, nonce: Date.now() });
+        setViewRequest({ target: "library", nonce: Date.now() });
+      });
+    },
+    [confirmDiscard],
+  );
+
+  const openInEditorGuarded = useCallback(
+    (relativePath: string) => {
+      void confirmDiscard().then((ok) => {
+        if (!ok) return;
+        setFocusFile(null);
+        setViewerFile(null);
+        setDeliveryOpen(false);
+        setOpenFile({ relativePath, nonce: Date.now() });
+      });
+    },
+    [confirmDiscard],
+  );
+
+  const openInViewerGuarded = useCallback(
+    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
+      void confirmDiscard().then((ok) => {
+        if (!ok) return;
+        setOpenFile(null);
+        setDeliveryOpen(false);
+        setFocusFile(null);
+        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
+      });
+    },
+    [confirmDiscard],
+  );
+
+  const currentIdRef = useRef<string | null>(null);
+  currentIdRef.current = current?.id ?? null;
+
+  const openPath = useCallback(
+    async (path: string) => {
+      try {
+        const target = await api.openFilePath(path);
+        if (!(await confirmDiscard())) return;
+        if (currentIdRef.current !== target.libraryId) {
+          await switchLibraryCore(target.libraryId, false);
+        }
+        setFocusFile(null);
+        setDeliveryOpen(false);
+        const route = openRouteFor(target.format);
+        if (route === "editor") {
+          setViewerFile(null);
+          setOpenFile({ relativePath: target.relativePath, nonce: Date.now() });
+        } else if (route === "system") {
+          await api.openPathInSystem(target.libraryId, target.relativePath);
+        } else {
+          setOpenFile(null);
+          setViewerFile({ relativePath: target.relativePath, kind: route, nonce: Date.now() });
+        }
+      } catch (err) {
+        await dialog.alert(String(err), "无法打开文件");
+      }
+    },
+    [confirmDiscard, dialog, switchLibraryCore],
+  );
+
+  const pickAndOpenFile = useCallback(async () => {
+    const picked = await openFileDialog({
+      multiple: false,
+      title: "打开文件",
+      filters: [
+        { name: "文档与常见文件", extensions: ["md", "markdown", "txt", "json", "yaml", "yml", "xml", "csv", "log", "ini", "pdf", "docx", "xlsx", "pptx", "png", "jpg", "jpeg", "webp", "gif", "svg"] },
+        { name: "所有文件", extensions: ["*"] },
+      ],
+    });
+    if (!picked || Array.isArray(picked)) return;
+    await openPath(picked);
+  }, [openPath]);
+
+  // 启动参数 / 文件关联双击 / 二次启动传来的待打开文件
+  const openPathRef = useRef(openPath);
+  openPathRef.current = openPath;
+  useEffect(() => {
+    void api.takePendingOpenPaths().then((paths) => {
+      if (paths.length > 0) void openPathRef.current(paths[0]);
+    });
+    const un = listen<string[]>("open-paths", (event) => {
+      void api.takePendingOpenPaths().catch(() => []);
+      if (event.payload.length > 0) void openPathRef.current(event.payload[0]);
+    });
+    // 把文件拖进窗口即可打开
+    const unDrop = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === "drop" && event.payload.paths.length > 0) {
+        void openPathRef.current(event.payload.paths[0]);
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+      void unDrop.then((f) => f());
+    };
   }, []);
 
   const value = useMemo<LibraryContextValue>(
@@ -242,48 +383,48 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       openFile,
       editorDirty,
       setEditorDirty,
+      confirmDiscard,
+      openPath,
+      pickAndOpenFile,
       deliveryOpen,
       viewerFile,
       openWizard: () => setWizardOpen(true),
       closeWizard: () => setWizardOpen(false),
       requestSearchView,
+      requestView,
       requestTasksView,
       switchToLibrary,
       libraryCreated,
       removeLibrary,
       closeCurrentLibrary: () => {
-        setCurrent(null);
-        setScanStatus(IDLE_SCAN);
-        setFocusFile(null);
-        setOpenFile(null);
-        setViewerFile(null);
-        setEditorDirty(false);
-        api.setWatchedLibrary("").catch(() => {});
+        void confirmDiscard().then((ok) => {
+          if (!ok) return;
+          setCurrent(null);
+          setScanStatus(IDLE_SCAN);
+          setFocusFile(null);
+          setOpenFile(null);
+          setViewerFile(null);
+          setEditorDirty(false);
+          api.setWatchedLibrary("").catch(() => {});
+        });
       },
       requestFocusFile,
-      openInEditor: (relativePath: string) => {
-        setFocusFile(null);
-        setViewerFile(null);
-        setDeliveryOpen(false);
-        setOpenFile({ relativePath, nonce: Date.now() });
-      },
+      openInEditor: openInEditorGuarded,
       closeFile: () => setOpenFile(null),
-      openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
-        setOpenFile(null);
-        setDeliveryOpen(false);
-        setFocusFile(null);
-        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
-      },
+      openInViewer: openInViewerGuarded,
       closeViewer: () => setViewerFile(null),
       openDelivery: () => {
-        setOpenFile(null);
-        setViewerFile(null);
-        setFocusFile(null);
-        setDeliveryOpen(true);
+        void confirmDiscard().then((ok) => {
+          if (!ok) return;
+          setOpenFile(null);
+          setViewerFile(null);
+          setFocusFile(null);
+          setDeliveryOpen(true);
+        });
       },
       closeDelivery: () => setDeliveryOpen(false),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

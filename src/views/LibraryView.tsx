@@ -20,7 +20,8 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
-import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
+import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
+import { useDialog } from "../components/DialogContext";
 import type { FileEntry } from "../lib/types";
 
 type SortKey = "name" | "mtime" | "size";
@@ -115,6 +116,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  */
 export default function LibraryView() {
   const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, openFile, closeFile } = useLibrary();
+  const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
   const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
@@ -264,14 +266,14 @@ export default function LibraryView() {
       navigate(entry.relativePath);
       return;
     }
-    if (entry.format === "pdf") {
-      openInViewer(entry.relativePath, "pdf");
-    } else if (entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint") {
-      openInViewer(entry.relativePath, "office");
-    } else if (entry.format === "image") {
-      openInViewer(entry.relativePath, "image");
-    } else if (EDITABLE_FORMATS.has(entry.format)) {
+    const route = openRouteFor(entry.format);
+    if (route === "editor") {
       openInEditor(entry.relativePath);
+    } else if (route === "system") {
+      // 无内置查看器的格式：交给系统默认应用（不再是「双击没反应」）
+      if (current) void api.openPathInSystem(current.id, entry.relativePath).catch((err) => appDialog.alert(String(err), "无法打开"));
+    } else {
+      openInViewer(entry.relativePath, route);
     }
   }
 
@@ -291,7 +293,7 @@ export default function LibraryView() {
       // 导入后跳到目标目录（列表会随重扫完成自动刷新）
       setCurrentDir(importedPath.includes("/") ? importedPath.slice(0, importedPath.lastIndexOf("/")) : "");
     } catch (err) {
-      alert(`导入失败：${err}`);
+      await appDialog.alert(`导入失败：${err}`, "导入失败");
     } finally {
       setImporting(false);
     }
@@ -327,7 +329,7 @@ export default function LibraryView() {
       setDirOptions(dirs);
       setMoveTarget(entry.parentPath);
     } catch (err) {
-      alert(`加载目录失败：${err}`);
+      await appDialog.alert(`加载目录失败：${err}`, "加载失败");
     }
   }
 
@@ -340,23 +342,23 @@ export default function LibraryView() {
       setMenu(null);
       if (successHint) console.log(successHint);
     } catch (err) {
-      alert(`操作失败：${err}`);
+      await appDialog.alert(`${err}`, "操作失败");
     } finally {
       setBusy(false);
     }
   }
 
-  function confirmDelete(entry: FileEntry) {
-    if (
-      !confirm(
-        `确定删除「${entry.relativePath}」吗？
-
-` +
-          (entry.isDir ? "整个文件夹（含全部内容）将" : "文件将") +
-          "移入系统回收站，可从回收站还原；MarkFlow 索引会自动更新。",
-      )
-    )
-      return;
+  async function confirmDelete(entry: FileEntry) {
+    const ok = await appDialog.confirm({
+      title: "删除到回收站",
+      message:
+        `确定删除「${entry.relativePath}」吗？\n\n` +
+        (entry.isDir ? "整个文件夹（含全部内容）将" : "文件将") +
+        "移入系统回收站，可从回收站还原；MarkFlow 索引会自动更新。",
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     void runOperation(() => api.deleteLibraryEntry(current!.id, entry.relativePath));
   }
 
@@ -435,11 +437,12 @@ export default function LibraryView() {
               key={label}
               type="button"
               disabled
-              title="智能集合将在后续迭代实现"
+              title="智能集合尚未开放，按路线图后续交付"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-gray-400"
             >
               <Icon className="h-3.5 w-3.5" />
               {label}
+              <span className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400">未开放</span>
             </button>
           ))}
         </div>
@@ -580,19 +583,7 @@ export default function LibraryView() {
                   <tr
                     key={entry.relativePath}
                     onClick={() => setSelected(entry)}
-                    onDoubleClick={() => {
-                      if (entry.isDir) {
-                        navigate(entry.relativePath);
-                      } else if (entry.format === "pdf") {
-                        openInViewer(entry.relativePath, "pdf");
-                      } else if (entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint") {
-                        openInViewer(entry.relativePath, "office");
-                      } else if (entry.format === "image") {
-                        openInViewer(entry.relativePath, "image");
-                      } else if (EDITABLE_FORMATS.has(entry.format)) {
-                        openInEditor(entry.relativePath);
-                      }
-                    }}
+                    onDoubleClick={() => openEntry(entry)}
                     title={
                       entry.isDir
                         ? "双击进入目录"
@@ -672,7 +663,7 @@ export default function LibraryView() {
 
             <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">标签</p>
             <div className="rounded-lg border border-dashed border-gray-200 px-3 py-3 text-center text-xs text-gray-400">
-              标签功能将在后续迭代提供
+              标签功能尚未开放（按路线图后续交付）
             </div>
 
             <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">相关文档</p>

@@ -11,6 +11,8 @@ export interface LibraryMeta {
 }
 
 export interface LibrarySettings {
+  /** 单文件模式的隐式库（不出现在文档库列表） */
+  adhoc?: boolean;
   excludeDirs: string[];
   fullTextIndex: boolean;
   ocrEnabled: boolean;
@@ -85,6 +87,8 @@ export interface TextFileContent {
   content: string;
   baseMtime: number;
   size: number;
+  /** 检测到的磁盘编码（UTF-8 / UTF-8 BOM / UTF-16 / GBK），保存时按原编码写回 */
+  encoding: string;
 }
 
 /** 保存/恢复结果 */
@@ -169,6 +173,8 @@ export interface AiTestResult {
 export interface SensitiveHit {
   kind: string;
   label: string;
+  /** 所属文件（相对路径）；用户输入为「（输入内容）」 */
+  file: string;
   line: number;
   masked: string;
 }
@@ -198,6 +204,29 @@ export interface AiChatRequest {
   contextPaths: string[];
   messages: AiChatMessage[];
   allowSensitive: boolean;
+  /** 备用 Provider（可选；主 Provider 网络失败 / 429 / 5xx 且尚无输出时回退） */
+  fallbackProviderId?: string;
+}
+
+export interface AiChatOutcome {
+  model: string;
+  providerName: string;
+  usedFallback: boolean;
+  sensitiveHitCount: number;
+}
+
+/** 打开任意文件的解析结果 */
+export interface OpenTarget {
+  libraryId: string;
+  relativePath: string;
+  format: string;
+  /** 单文件模式：文件不在任何文档库内 */
+  adhoc: boolean;
+}
+
+export interface RecentFile {
+  path: string;
+  openedAt: number;
 }
 
 /** 质量检查问题（§8.9：error 可阻止交付） */

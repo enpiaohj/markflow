@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
@@ -8,6 +9,7 @@ import EditorPane from "./components/EditorPane";
 import ImagePreviewPane from "./components/ImagePreviewPane";
 import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
+import { DialogProvider, useDialog } from "./components/DialogContext";
 import { LibraryProvider, useLibrary } from "./components/LibraryContext";
 import { ZoomProvider } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
@@ -36,17 +38,42 @@ const placeholderViews: Record<
 /** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
 function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
-  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, editorDirty, closeFile, closeViewer, current } = useLibrary();
+  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, editorDirty, closeFile, closeViewer, closeDelivery, current, confirmDiscard } = useLibrary();
+  const dialog = useDialog();
 
   /** 统一的视图切换入口：编辑器/查看器打开时先关闭（有未保存修改则确认） */
-  function selectView(id: ViewId) {
-    if (openFile && editorDirty && !window.confirm("当前文档有未保存的修改，离开将丢失这些修改。\n确定继续吗？")) {
-      return;
-    }
+  async function selectView(id: ViewId) {
+    if (openFile && !(await confirmDiscard())) return;
     if (openFile) closeFile();
     if (viewerFile) closeViewer();
+    if (deliveryOpen) closeDelivery();
     setActiveView(id);
   }
+
+  // 窗口关闭前：存在未保存修改时确认，避免直接丢失
+  const dirtyRef = useRef(false);
+  dirtyRef.current = editorDirty;
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const un = win.onCloseRequested(async (event) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      const ok = await dialog.confirm({
+        title: "退出 MarkFlow？",
+        message: "当前文档有未保存的修改，退出将丢失这些修改。\n（下次打开同一文件时可从恢复草稿找回最近的编辑内容。）",
+        confirmText: "仍然退出",
+        danger: true,
+      });
+      if (ok) {
+        dirtyRef.current = false;
+        await win.destroy();
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 视图切换请求：切换/创建文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
   useEffect(() => {
@@ -110,12 +137,14 @@ function Shell() {
 
 export default function App() {
   return (
-    <ZoomProvider>
-      <LibraryProvider>
-        <TasksProvider>
-          <Shell />
-        </TasksProvider>
-      </LibraryProvider>
-    </ZoomProvider>
+    <DialogProvider>
+      <ZoomProvider>
+        <LibraryProvider>
+          <TasksProvider>
+            <Shell />
+          </TasksProvider>
+        </LibraryProvider>
+      </ZoomProvider>
+    </DialogProvider>
   );
 }

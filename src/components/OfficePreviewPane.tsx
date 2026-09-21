@@ -10,6 +10,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { ConversionPrecheck } from "../lib/types";
+import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
@@ -22,6 +23,7 @@ import type { OfficePreview } from "../lib/types";
  */
 export default function OfficePreviewPane() {
   const { current, viewerFile, closeViewer, openInViewer, openInEditor } = useLibrary();
+  const dialog = useDialog();
   const { config: zoomConfig, configure: configureZoom } = useZoom();
   const [preview, setPreview] = useState<OfficePreview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,7 +78,7 @@ export default function OfficePreviewPane() {
       const check = await api.docxPrecheck(current.id, rel);
       setPrecheck(check);
     } catch (err) {
-      alert(`预检失败：${err}`);
+      await dialog.alert(`预检失败：${err}`, "预检失败");
     } finally {
       setConverting(false);
     }
@@ -94,7 +96,7 @@ export default function OfficePreviewPane() {
       // 打开转换出的可编辑副本（重扫完成后即纳入索引与搜索）
       openInEditor(mdPath);
     } catch (err) {
-      alert(`转换失败：${err}`);
+      await dialog.alert(`转换失败：${err}`, "转换失败");
     } finally {
       setConverting(false);
     }
@@ -107,7 +109,7 @@ export default function OfficePreviewPane() {
       const bytes = await api.convertOfficeToPdf(current.id, rel);
       openInViewer(rel, "hifi", bytes);
     } catch (err) {
-      alert(String(err));
+      await dialog.alert(String(err), "高保真预览失败");
     } finally {
       setHifiLoading(false);
     }

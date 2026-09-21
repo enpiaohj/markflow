@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   FileText,
@@ -7,8 +7,10 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  Square,
   Trash2,
 } from "lucide-react";
+import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import * as api from "../lib/api";
 import { formatSize } from "../lib/format";
@@ -20,45 +22,73 @@ import type {
   SensitiveHit,
 } from "../lib/types";
 
-/** 【来源 n】引用高亮 */
-function SourceText({ text }: { text: string }) {
+interface ChatItem extends AiChatMessage {
+  /** 助手回答的实际生成方（回退后如实标注） */
+  meta?: { providerName: string; model: string; usedFallback: boolean };
+}
+
+/** 【来源 n】引用：可点击，跳转到对应文件 */
+function SourceText({ text, onOpen }: { text: string; onOpen: (n: number) => void }) {
   const parts = text.split(/(【来源 \d+】)/g);
   return (
-    <>
-      {parts.map((part, i) =>
-        /^【来源 \d+】$/.test(part) ? (
-          <span key={i} className="rounded bg-primary-50 px-1 font-medium text-primary-700">
+    <span className="whitespace-pre-wrap break-words">
+      {parts.map((part, i) => {
+        const m = /^【来源 (\d+)】$/.exec(part);
+        return m ? (
+          <button
+            key={i}
+            type="button"
+            title="点击打开该来源文件"
+            onClick={() => onOpen(Number(m[1]))}
+            className="rounded bg-primary-50 px-1 font-medium text-primary-700 hover:bg-primary-100"
+          >
             {part}
-          </span>
+          </button>
         ) : (
-          part
-        ),
-      )}
-    </>
+          <span key={i}>{part}</span>
+        );
+      })}
+    </span>
   );
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 /**
- * AI 助手面板（设计文档 §8.6，概念图「多文件 AI 综合分析」「Markdown 编辑器·AI助手」）：
- * 上下文门禁（prepare → 范围/Token/敏感扫描展示 → 确认放行）→ 流式对话 → 结果存为文档。
+ * AI 助手面板（设计文档 §8.6）：
+ * 上下文门禁（首次 / 范围变化时展示文件、Token、Provider 并确认；敏感命中必须放行）
+ * → 流式对话（可取消、可回退到备用 Provider）→ 结果存为文档。
  */
 export default function AiPanel({ currentPath }: { currentPath: string }) {
-  const { current } = useLibrary();
+  const { current, openPath } = useLibrary();
+  const dialog = useDialog();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [providerId, setProviderId] = useState("");
+  const [fallbackId, setFallbackId] = useState("");
   const [libraryFiles, setLibraryFiles] = useState<FileEntry[]>([]);
+  const [fileFilter, setFileFilter] = useState("");
   const [contextPaths, setContextPaths] = useState<string[]>([currentPath]);
   const [showFilePicker, setShowFilePicker] = useState(false);
-  const [messages, setMessages] = useState<AiChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatItem[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [error, setError] = useState("");
-  const [sensitiveConfirm, setSensitiveConfirm] = useState<{
-    hits: SensitiveHit[];
-    pendingText: string;
-  } | null>(null);
+  const [sensitiveConfirm, setSensitiveConfirm] = useState<{ hits: SensitiveHit[]; pendingText: string } | null>(null);
+  const [sendConfirm, setSendConfirm] = useState<{ preview: ContextPreview; pendingText: string } | null>(null);
+  /** 已确认发送的范围指纹：范围 / Provider 不变时同一会话内不再重复询问 */
+  const [confirmedKey, setConfirmedKey] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const provider = providers.find((p) => p.id === providerId);
+  const fallback = providers.find((p) => p.id === fallbackId);
+  const scopeKey = `${providerId}|${fallbackId}|${contextPaths.join("\n")}`;
 
   useEffect(() => {
     void api.aiListProviders().then((list) => {
@@ -69,20 +99,26 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
 
   useEffect(() => {
     if (!current) return;
-    void api.listLibraryFiles(current.id, 500).then(setLibraryFiles);
+    void api.listLibraryFiles(current.id, 20000).then(setLibraryFiles);
   }, [current]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamText]);
 
-  async function runChat(userText: string, allowSensitive: boolean) {
+  const filteredFiles = useMemo(() => {
+    const q = fileFilter.trim().toLowerCase();
+    const list = q ? libraryFiles.filter((f) => f.relativePath.toLowerCase().includes(q)) : libraryFiles;
+    return list.slice(0, 300);
+  }, [libraryFiles, fileFilter]);
+
+  async function runChat(userText: string, allowSensitive: boolean, skipConfirm = false) {
     if (!current || !providerId) return;
     setError("");
-    const history: AiChatMessage[] = [...messages, { role: "user", content: userText }];
+    const history: ChatItem[] = [...messages, { role: "user", content: userText }];
 
     // 门禁第一步：上下文预览（范围 + Token 估算 + 敏感扫描），不发送
-    let preview: ContextPreview | null = null;
+    let preview: ContextPreview;
     try {
       preview = await api.aiPrepareContext(current.id, contextPaths);
     } catch (err) {
@@ -93,33 +129,54 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
       setSensitiveConfirm({ hits: preview.sensitiveHits, pendingText: userText });
       return;
     }
+    // 发送前确认：首次或范围 / Provider 变化时显示将发送的内容与去向
+    if (!skipConfirm && confirmedKey !== scopeKey) {
+      setSendConfirm({ preview, pendingText: userText });
+      return;
+    }
 
-    setMessages(history);
+    setMessages(history.map((m) => ({ role: m.role, content: m.content, meta: m.meta })));
     setInput("");
     setStreaming(true);
     setStreamText("");
+    let full = "";
     try {
       const outcome = await api.aiChat(
         {
           providerId,
           libraryId: current.id,
           contextPaths,
-          messages: history,
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
           allowSensitive,
+          fallbackProviderId: fallbackId || undefined,
         },
-        (chunk) => setStreamText((prev) => prev + chunk),
+        (chunk) => {
+          full += chunk;
+          setStreamText(full);
+        },
       );
-      setStreamText((full) => {
-        setMessages((prev) => [...prev, { role: "assistant", content: full || "（空响应）" }]);
-        return "";
-      });
-      void outcome;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: full || "（空响应）",
+          meta: { providerName: outcome.providerName, model: outcome.model, usedFallback: outcome.usedFallback },
+        },
+      ]);
+      setStreamText("");
     } catch (err) {
       const message = String(err);
       if (message.startsWith("SENSITIVE::")) {
         const hits = JSON.parse(message.slice("SENSITIVE::".length)) as SensitiveHit[];
         setSensitiveConfirm({ hits, pendingText: userText });
+      } else if (message.includes("已取消")) {
+        // 保留已生成的部分内容
+        if (full) setMessages((prev) => [...prev, { role: "assistant", content: `${full}\n\n（已取消生成）` }]);
+        setStreamText("");
       } else {
+        // 保留已收到的部分内容，避免用户看到的回答凭空消失
+        if (full) setMessages((prev) => [...prev, { role: "assistant", content: `${full}\n\n（生成中断）` }]);
+        setStreamText("");
         setError(message);
       }
     } finally {
@@ -136,17 +193,27 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
   async function saveAnswerAsDoc(answer: string) {
     if (!current) return;
     const defaultName = `AI-回答-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, "")}.md`;
-    const name = prompt("保存为新文档（文件名）：", defaultName);
+    const name = await dialog.prompt({
+      title: "保存为新文档",
+      label: "文件名（保存在当前文件所在目录）",
+      defaultValue: defaultName,
+      validate: (v) => (v.trim() ? null : "文件名不能为空"),
+    });
     if (!name) return;
     try {
-      const parent = currentPath.includes("/")
-        ? currentPath.slice(0, currentPath.lastIndexOf("/"))
-        : "";
-      await api.createTextFile(current.id, parent, name, answer);
-      alert(`已保存为 ${parent ? parent + "/" : ""}${name}`);
+      const parent = currentPath.includes("/") ? currentPath.slice(0, currentPath.lastIndexOf("/")) : "";
+      const finalName = /\.[A-Za-z0-9]+$/.test(name.trim()) ? name.trim() : `${name.trim()}.md`;
+      await api.createTextFile(current.id, parent, finalName, answer);
+      await dialog.alert(`已保存为 ${parent ? parent + "/" : ""}${finalName}`, "已保存");
     } catch (err) {
-      alert(`保存失败：${err}`);
+      await dialog.alert(`保存失败：${err}`, "保存失败");
     }
+  }
+
+  function openSource(n: number) {
+    const rel = contextPaths[n - 1];
+    if (!rel || !current) return;
+    void openPath(`${current.rootPath.replace(/[\\/]+$/, "")}/${rel}`);
   }
 
   if (!current) return null;
@@ -179,6 +246,23 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
             </option>
           ))}
         </select>
+        {providers.length > 1 && (
+          <select
+            value={fallbackId}
+            onChange={(e) => setFallbackId(e.target.value)}
+            title="主 Provider 网络失败 / 超时 / 429 / 5xx 且尚无输出时，才会把同样内容发送到备用 Provider"
+            className="mt-1.5 h-7 w-full rounded-lg border border-gray-200 bg-white px-2 text-[11px] text-gray-500 outline-none focus:border-primary-500"
+          >
+            <option value="">不使用备用 Provider</option>
+            {providers
+              .filter((p) => p.id !== providerId)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  备用：{p.name} · {p.model}
+                </option>
+              ))}
+          </select>
+        )}
 
         {/* 上下文选择 */}
         <div className="mt-2">
@@ -189,34 +273,46 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
           >
             <span className="flex items-center gap-1.5">
               <FileText className="h-3 w-3" />
-              上下文（{contextPaths.length} 个文件，发送前会扫描敏感信息）
+              上下文（{contextPaths.length} 个文件，发送前会确认并扫描敏感信息）
             </span>
             <span className="text-gray-400">{showFilePicker ? "收起" : "管理"}</span>
           </button>
           {showFilePicker && (
-            <div className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-gray-200">
-              {libraryFiles.map((f) => {
-                const checked = contextPaths.includes(f.relativePath);
-                return (
-                  <label
-                    key={f.relativePath}
-                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setContextPaths((prev) =>
-                          checked ? prev.filter((p) => p !== f.relativePath) : [...prev, f.relativePath],
-                        )
-                      }
-                      className="accent-primary-600"
-                    />
-                    <span className="truncate">{f.relativePath}</span>
-                    <span className="ml-auto shrink-0 text-gray-300">{formatSize(f.size)}</span>
-                  </label>
-                );
-              })}
+            <div className="mt-1 rounded-lg border border-gray-200">
+              <input
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+                placeholder="筛选文件…"
+                className="h-7 w-full rounded-t-lg border-b border-gray-100 px-2.5 text-[11px] outline-none"
+              />
+              <div className="max-h-44 overflow-y-auto">
+                {filteredFiles.map((f) => {
+                  const checked = contextPaths.includes(f.relativePath);
+                  return (
+                    <label
+                      key={f.relativePath}
+                      className="flex cursor-pointer items-center gap-2 px-2.5 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setContextPaths((prev) =>
+                            checked ? prev.filter((p) => p !== f.relativePath) : [...prev, f.relativePath],
+                          )
+                        }
+                        className="accent-primary-600"
+                      />
+                      <span className="truncate">{f.relativePath}</span>
+                      <span className="ml-auto shrink-0 text-gray-300">{formatSize(f.size)}</span>
+                    </label>
+                  );
+                })}
+                {filteredFiles.length === 0 && <p className="px-2.5 py-2 text-[11px] text-gray-400">没有匹配的文件</p>}
+                {libraryFiles.length > filteredFiles.length && !fileFilter && (
+                  <p className="px-2.5 py-1.5 text-[10px] text-gray-400">仅显示前 300 个，请用上方筛选缩小范围</p>
+                )}
+              </div>
             </div>
           )}
           {contextPaths
@@ -245,7 +341,7 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
             <p className="mt-2 text-xs leading-relaxed text-gray-400">
               基于当前文档与所选上下文提问。
               <br />
-              AI 回答会标注【来源 n】引用。
+              AI 回答会标注可点击的【来源 n】引用。
             </p>
           </div>
         )}
@@ -260,8 +356,8 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
             >
               {m.role === "assistant" ? (
                 <>
-                  <SourceText text={m.content} />
-                  <div className="mt-2 border-t border-gray-100 pt-1.5">
+                  <SourceText text={m.content} onOpen={openSource} />
+                  <div className="mt-2 flex items-center gap-3 border-t border-gray-100 pt-1.5">
                     <button
                       type="button"
                       onClick={() => void saveAnswerAsDoc(m.content)}
@@ -270,22 +366,77 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
                       <Save className="h-3 w-3" />
                       存为文档
                     </button>
+                    {m.meta && (
+                      <span
+                        className={`text-[10px] ${m.meta.usedFallback ? "font-medium text-amber-600" : "text-gray-300"}`}
+                        title={m.meta.usedFallback ? "主 Provider 失败，本回答由备用 Provider 生成" : undefined}
+                      >
+                        {m.meta.usedFallback ? "备用 · " : ""}
+                        {m.meta.providerName} · {m.meta.model}
+                      </span>
+                    )}
                   </div>
                 </>
               ) : (
-                m.content
+                <span className="whitespace-pre-wrap break-words">{m.content}</span>
               )}
             </div>
           </div>
         ))}
-        {streamText && (
+        {streaming && (
           <div className="inline-block max-w-full rounded-xl bg-gray-50 px-3 py-2 text-left text-xs leading-relaxed text-gray-800 ring-1 ring-gray-100">
-            <SourceText text={streamText} />
+            {streamText ? <SourceText text={streamText} onOpen={openSource} /> : <span className="text-gray-400">正在连接…</span>}
             <Loader2 className="ml-1 inline h-3 w-3 animate-spin text-gray-300" />
           </div>
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* 发送前确认：范围 / Token / 去向 */}
+      {sendConfirm && provider && (
+        <div className="shrink-0 border-t border-primary-100 bg-primary-50/60 px-3 py-2.5">
+          <p className="text-[11px] font-medium text-primary-700">即将发送到 AI Provider，请确认：</p>
+          <p className="mt-1 text-[11px] text-gray-600">
+            去向：{provider.name} · {provider.model}（{hostOf(provider.baseUrl)}）
+            {fallback ? `；失败时回退到 ${fallback.name}（${hostOf(fallback.baseUrl)}）` : ""}
+          </p>
+          {/^http:\/\//i.test(provider.baseUrl) && !/localhost|127\.0\.0\.1/.test(provider.baseUrl) && (
+            <p className="mt-1 text-[11px] font-medium text-red-600">该地址使用明文 HTTP，内容与 API Key 可能被窃听。</p>
+          )}
+          <ul className="mt-1 max-h-24 space-y-0.5 overflow-y-auto text-[10px] text-gray-500">
+            {sendConfirm.preview.files.map((f, i) => (
+              <li key={i} className="truncate">
+                【来源 {i + 1}】{f.relativePath} ·{" "}
+                {f.skipped ? <span className="text-amber-600">未包含：{f.skipped}</span> : `${f.chars.toLocaleString()} 字符${f.truncated ? "（已截断）" : ""}`}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[10px] text-gray-500">
+            合计约 {sendConfirm.preview.totalChars.toLocaleString()} 字符 / {sendConfirm.preview.estimatedTokens.toLocaleString()} Token（估算）。敏感信息扫描：未发现。
+          </p>
+          <div className="mt-2 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSendConfirm(null)}
+              className="h-6.5 rounded-md border border-gray-200 bg-white px-2 text-[11px] text-gray-600 hover:bg-gray-50"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const text = sendConfirm.pendingText;
+                setConfirmedKey(scopeKey);
+                setSendConfirm(null);
+                void runChat(text, false, true);
+              }}
+              className="h-6.5 rounded-md bg-primary-600 px-2 text-[11px] font-medium text-white hover:bg-primary-700"
+            >
+              确认发送
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 敏感信息放行确认 */}
       {sensitiveConfirm && (
@@ -295,9 +446,9 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
             上下文中发现 {sensitiveConfirm.hits.length} 处疑似敏感信息：
           </p>
           <ul className="mt-1 max-h-20 space-y-0.5 overflow-y-auto text-[10px] text-amber-600">
-            {sensitiveConfirm.hits.slice(0, 5).map((h, i) => (
-              <li key={i}>
-                第 {h.line} 行 · {h.label} · {h.masked}
+            {sensitiveConfirm.hits.slice(0, 8).map((h, i) => (
+              <li key={i} className="truncate">
+                {h.file || "（输入内容）"} · 第 {h.line} 行 · {h.label} · {h.masked}
               </li>
             ))}
           </ul>
@@ -315,7 +466,8 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
               onClick={() => {
                 const text = sensitiveConfirm.pendingText;
                 setSensitiveConfirm(null);
-                void runChat(text, true);
+                setConfirmedKey(scopeKey);
+                void runChat(text, true, true);
               }}
               className="h-6.5 rounded-md bg-amber-500 px-2 text-[11px] font-medium text-white hover:bg-amber-600"
             >
@@ -338,23 +490,34 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 send();
               }
             }}
             rows={2}
-            placeholder="基于所选上下文提问…（Enter 发送）"
+            placeholder="基于所选上下文提问…（Enter 发送，Shift + Enter 换行）"
             className="max-h-28 min-h-[38px] flex-1 resize-y rounded-lg border border-gray-200 px-2.5 py-2 text-xs outline-none placeholder:text-gray-300 focus:border-primary-500"
           />
-          <button
-            type="button"
-            onClick={send}
-            disabled={streaming || !input.trim()}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-40"
-          >
-            {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </button>
+          {streaming ? (
+            <button
+              type="button"
+              onClick={() => void api.aiCancel()}
+              title="停止生成"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-700 text-white hover:bg-gray-800"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={send}
+              disabled={!input.trim()}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-40"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

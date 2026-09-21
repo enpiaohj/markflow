@@ -10,14 +10,52 @@ mod fsops;
 mod library;
 mod ocr;
 mod office;
+mod openfile;
+mod selfwrite;
 mod sensitive;
 mod tasks;
+mod textenc;
 mod watch;
 
 use library::{AppState, CreateLibraryRequest};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use watch::WatchState;
+
+/// 打开任意文件：定位所属文档库，或进入单文件模式。
+#[tauri::command]
+fn open_file_path(state: State<'_, AppState>, path: String) -> Result<openfile::OpenTarget, String> {
+    let conn = state.0.lock().unwrap();
+    let target = openfile::resolve(&conn, &path)?;
+    openfile::push_recent(&conn, &openfile::normalize(std::path::Path::new(&path)));
+    Ok(target)
+}
+
+/// 取走启动参数 / 二次启动传来的待打开文件路径（前端就绪后调用一次）。
+#[tauri::command]
+fn take_pending_open_paths(pending: State<'_, openfile::PendingOpen>) -> Vec<String> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
+}
+
+/// 最近打开的文件（仅保留仍存在的）。
+#[tauri::command]
+fn list_recent_files(state: State<'_, AppState>) -> Vec<openfile::RecentFile> {
+    openfile::read_recent(&state.0.lock().unwrap())
+        .into_iter()
+        .filter(|r| std::path::Path::new(&r.path).is_file())
+        .collect()
+}
+
+/// 文件当前磁盘 mtime（窗口聚焦时检测外部修改）。
+#[tauri::command]
+fn stat_file_mtime(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<i64, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    Ok(library::file_mtime(&std::path::Path::new(&root).join(relative_path)))
+}
 
 /// 返回应用基础信息，供前端关于信息使用。
 #[tauri::command]
@@ -442,17 +480,40 @@ async fn ai_chat(
     channel: tauri::ipc::Channel<String>,
     request: ai::AiChatRequest,
 ) -> Result<ai::ChatOutcome, String> {
-    let (root, provider, key) = {
+    let (root, providers) = {
         let conn = state.0.lock().unwrap();
-        let provider = ai::read_providers(&conn)
-            .into_iter()
+        let all = ai::read_providers(&conn);
+        let primary = all
+            .iter()
             .find(|p| p.id == request.provider_id)
+            .cloned()
             .ok_or("Provider 不存在")?;
-        let key = ai::provider_key(&provider.id)?;
+        let mut providers = vec![(primary.clone(), ai::provider_key(&primary.id)?)];
+        if let Some(fid) = request.fallback_provider_id.as_deref().filter(|f| *f != primary.id) {
+            if let Some(fallback) = all.iter().find(|p| p.id == fid).cloned() {
+                providers.push((fallback.clone(), ai::provider_key(&fallback.id)?));
+            }
+        }
         let root = library::get_library(&conn, &request.library_id)?.root_path;
-        (root, provider, key)
+        (root, providers)
     };
-    ai::chat(&root, provider, key, channel, request).await
+    ai::chat(&root, providers, channel, request).await
+}
+
+/// 取消正在进行的 AI 对话。
+#[tauri::command]
+fn ai_cancel() {
+    ai::CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 更新 Provider（API Key 留空表示不修改）。
+#[tauri::command]
+fn ai_update_provider(
+    state: State<'_, AppState>,
+    id: String,
+    request: ai::ProviderSaveRequest,
+) -> Result<ai::ProviderConfig, String> {
+    ai::update_provider(&state.0.lock().unwrap(), &id, request)
 }
 
 /// 文档质量检查（Markdown：标题层级 / 断链 / 空章节 / 敏感信息）。
@@ -464,7 +525,7 @@ fn check_document(
 ) -> Result<Vec<checks::Issue>, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
-    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let content = textenc::decode_lossy_for_index(&std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?);
     let document_dir = path
         .parent()
         .map(|p| p.to_path_buf())
@@ -740,6 +801,7 @@ fn rename_library_entry(
 ) -> Result<String, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let new_rel = fsops::rename_entry(&root, &relative_path, &new_name)?;
+    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -756,6 +818,7 @@ fn move_library_entry(
 ) -> Result<String, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let new_rel = fsops::move_entry(&root, &relative_path, &target_dir)?;
+    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -895,6 +958,20 @@ fn restore_file_version(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // 二次启动（如双击 .md 文件）：把路径交给已运行的实例并聚焦窗口
+            let paths = openfile::paths_from_args(args.into_iter().skip(1));
+            if !paths.is_empty() {
+                if let Some(pending) = app.try_state::<openfile::PendingOpen>() {
+                    pending.0.lock().unwrap().extend(paths.clone());
+                }
+                let _ = app.emit("open-paths", paths);
+            }
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -902,10 +979,17 @@ pub fn run() {
             app.manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(conn))));
             app.manage(WatchState(std::sync::Mutex::new(None)));
             app.manage(tasks::TaskManager::default());
+            app.manage(openfile::PendingOpen(std::sync::Mutex::new(openfile::paths_from_args(
+                std::env::args().skip(1),
+            ))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            open_file_path,
+            take_pending_open_paths,
+            list_recent_files,
+            stat_file_mtime,
             list_libraries,
             quick_scan_library,
             create_library,
@@ -931,6 +1015,8 @@ pub fn run() {
             ai_test_provider,
             ai_prepare_context,
             ai_chat,
+            ai_cancel,
+            ai_update_provider,
             check_document,
             create_text_file,
             list_library_files,

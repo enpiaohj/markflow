@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ListChecks, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import * as api from "../lib/api";
 import { formatTime } from "../lib/format";
@@ -17,6 +18,7 @@ export default function AnnotationsPanel({
   getSelection: () => string;
 }) {
   const { current } = useLibrary();
+  const dialog = useDialog();
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [quote, setQuote] = useState("");
@@ -44,7 +46,7 @@ export default function AnnotationsPanel({
   function captureSelection() {
     const selected = getSelection().trim();
     if (selected) setQuote(selected);
-    else alert("请先在编辑器中选中要批注的文本");
+    else void dialog.alert("请先在编辑器中选中要批注的文本");
   }
 
   async function submit() {
@@ -55,7 +57,7 @@ export default function AnnotationsPanel({
       setBody("");
       await load();
     } catch (err) {
-      alert(`添加批注失败：${err}`);
+      await dialog.alert(`添加批注失败：${err}`, "添加失败");
     } finally {
       setAdding(false);
     }
