@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Word / PowerPoint 预览引擎默认改为「内置渲染」**：即时显示、左侧目录导航（按 Word 导航窗格同样的依据——标题样式与大纲级别提取）、
+  不再默认启动 Microsoft Office（也不再在选中文件时后台预热）。想使用 Office 导出的精确版式：
+  在「设置 → Word / PowerPoint 预览引擎」选「自动（有 Office 优先）」，或在文档工具栏点「版式预览」手动调用。
+  已经在设置里明确选过「自动」的用户保持不变。
+
+### Added
+
+- **Excel 表格支持筛选**：工具栏「筛选」开启后，表头行每列出现筛选按钮，点开是值列表（含搜索、全选 / 清除、各值出现次数），
+  按值筛选并隐藏不匹配的行（行号保持原样），显示「X / Y 行」，可一键清除全部筛选。表头行自动识别（优先文件里的自动筛选范围，
+  其次冻结窗格的最后一行），也可手动选择；文件本身带自动筛选时默认开启。筛选只影响显示，不修改文件。
+- Word / PowerPoint 预览工具栏新增「内置渲染 | Office 版式」切换（装有 Office / LibreOffice 时显示）：
+  一键在内置渲染与精确版式之间切换当前这份文档，不必进设置页；Office 版式查看器里的同名控件可切回内置渲染
+  （切回后本次不再自动调用 Office）。全局默认仍在设置中选择。
+
 ## [0.5.0] - 2026-09-21
 
 ### Added
