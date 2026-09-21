@@ -58,7 +58,7 @@ export default function StatusBar() {
             {runningCount} 个任务运行中
           </button>
         )}
-        <span>v0.3.1</span>
+        <span>v0.4.0</span>
         {config.visible && (
           <span className="flex items-center gap-1.5" title="缩放（Ctrl + 滚轮 / Ctrl + + / Ctrl + −）">
             <button
