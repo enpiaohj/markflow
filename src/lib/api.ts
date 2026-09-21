@@ -270,3 +270,28 @@ export function setAnnotationResolved(id: string | number, resolved: boolean): P
 export function deleteAnnotation(id: string | number): Promise<void> {
   return invoke("delete_annotation", { id });
 }
+
+// ---------------------------------------------------------------------------
+// 目录树文件操作（v0.2.0 后追加）
+// ---------------------------------------------------------------------------
+
+export function createLibraryDirectory(libraryId: string, parentDir: string, name: string): Promise<void> {
+  return invoke("create_library_directory", { libraryId, parentDir, name });
+}
+
+export function renameLibraryEntry(libraryId: string, relativePath: string, newName: string): Promise<string> {
+  return invoke("rename_library_entry", { libraryId, relativePath, newName });
+}
+
+export function moveLibraryEntry(libraryId: string, relativePath: string, targetDir: string): Promise<string> {
+  return invoke("move_library_entry", { libraryId, relativePath, targetDir });
+}
+
+/** 删除进系统回收站（可还原），不物理删除 */
+export function deleteLibraryEntry(libraryId: string, relativePath: string): Promise<void> {
+  return invoke("delete_library_entry", { libraryId, relativePath });
+}
+
+export function listLibraryDirs(libraryId: string): Promise<string[]> {
+  return invoke("list_library_dirs", { libraryId });
+}

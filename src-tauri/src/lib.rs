@@ -6,6 +6,7 @@ mod convert;
 mod delivery;
 mod editor;
 mod format;
+mod fsops;
 mod library;
 mod ocr;
 mod office;
@@ -700,6 +701,105 @@ fn delete_annotation(state: State<'_, AppState>, id: i64) -> Result<(), String> 
     annotations::delete(&state.0.lock().unwrap(), id)
 }
 
+/// 新建文件夹。
+#[tauri::command]
+fn create_library_directory(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    parent_dir: String,
+    name: String,
+) -> Result<(), String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    fsops::create_directory(&root, &parent_dir, &name)?;
+    rescan_library_bg(&app, &state, &tasks, &library_id)?;
+    Ok(())
+}
+
+/// 重命名文件或文件夹。
+#[tauri::command]
+fn rename_library_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    relative_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let new_rel = fsops::rename_entry(&root, &relative_path, &new_name)?;
+    rescan_library_bg(&app, &state, &tasks, &library_id)?;
+    Ok(new_rel)
+}
+
+/// 移动文件或文件夹到目标目录。
+#[tauri::command]
+fn move_library_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    relative_path: String,
+    target_dir: String,
+) -> Result<String, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let new_rel = fsops::move_entry(&root, &relative_path, &target_dir)?;
+    rescan_library_bg(&app, &state, &tasks, &library_id)?;
+    Ok(new_rel)
+}
+
+/// 删除文件或文件夹（进系统回收站，可还原）。
+#[tauri::command]
+fn delete_library_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tasks: State<'_, tasks::TaskManager>,
+    library_id: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    fsops::delete_entry(&root, &relative_path)?;
+    rescan_library_bg(&app, &state, &tasks, &library_id)?;
+    Ok(())
+}
+
+/// 列出库内全部目录（移动目标选择用）。
+#[tauri::command]
+fn list_library_dirs(state: State<'_, AppState>, library_id: String) -> Result<Vec<String>, String> {
+    let conn = state.0.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT relative_path FROM files WHERE library_id = ?1 AND is_dir = 1
+             ORDER BY relative_path COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![library_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
+/// 后台全量重扫（文件操作后由调用方触发，走任务中心与事件）。
+fn rescan_library_bg(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    tasks: &State<'_, tasks::TaskManager>,
+    library_id: &str,
+) -> Result<(), String> {
+    let meta = library::get_library(&state.0.lock().unwrap(), library_id)?;
+    library::spawn_full_scan(
+        app.clone(),
+        state.inner().clone(),
+        tasks.inner().clone(),
+        meta.id.clone(),
+        meta.name.clone(),
+        meta.root_path.clone().into(),
+        library::excludes_from(&meta.settings),
+    );
+    Ok(())
+}
+
 /// 读取可编辑文本文件（返回内容与冲突检测基线）。
 #[tauri::command]
 fn read_text_file(
@@ -823,6 +923,11 @@ pub fn run() {
             check_document,
             create_text_file,
             list_library_files,
+            list_library_dirs,
+            create_library_directory,
+            rename_library_entry,
+            move_library_entry,
+            delete_library_entry,
             ocr_available,
             ocr_file,
             add_annotation,
