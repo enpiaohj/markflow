@@ -13,7 +13,6 @@ import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { DialogProvider, useDialog } from "./components/DialogContext";
 import { LibraryProvider, TabScope, useLibrary } from "./components/LibraryContext";
-import TabStrip from "./components/TabStrip";
 import { ZoomProvider, ZoomScope } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
 import DeliveryView from "./views/DeliveryView";
@@ -124,7 +123,6 @@ function Shell() {
       <div className="flex min-h-0 flex-1">
         <ActivityBar activeView={activeView} onSelect={selectView} />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <TabStrip />
           <div className="min-h-0 flex-1">
           {/* 打开的文档：全部保持挂载（显示 / 隐藏切换），保留未保存编辑与滚动位置 */}
           {tabs.map((tab) => {

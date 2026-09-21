@@ -11,14 +11,14 @@ function tabIcon(tab: DocTab) {
   return <FileText className={cls} />;
 }
 
-/** 已打开文档的标签页：文档一直保留，直到点 × 关闭（有未保存修改会先确认） */
+/** 已打开文档的标签页（位于标题栏）：文档一直保留，直到点 × 关闭（有未保存修改会先确认） */
 export default function TabStrip() {
   const { tabs, activeTabId, activateTab, closeTab, dirtyTabs } = useLibrary();
   if (tabs.length === 0) return null;
   const multiLib = new Set(tabs.map((t) => t.lib.id)).size > 1;
 
   return (
-    <div role="tablist" className="flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto border-b border-gray-200 bg-gray-100 px-2 pt-1">
+    <div role="tablist" className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none]">
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
         const name = tab.kind === "delivery" ? "正式交付" : (tab.relativePath.split("/").pop() ?? tab.relativePath);
@@ -33,8 +33,8 @@ export default function TabStrip() {
             onAuxClick={(e) => {
               if (e.button === 1) void closeTab(tab.id);
             }}
-            className={`group flex h-8 max-w-[220px] shrink-0 cursor-default items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 text-[12.5px] ${
-              active ? "border-gray-200 bg-white text-gray-900" : "border-transparent text-gray-500 hover:bg-gray-200/70"
+            className={`group flex h-8 max-w-[200px] shrink-0 cursor-default items-center gap-1.5 rounded-md px-2.5 text-[12.5px] ${
+              active ? "bg-gray-100 font-medium text-gray-900" : "text-gray-500 hover:bg-gray-100"
             }`}
           >
             {tabIcon(tab)}

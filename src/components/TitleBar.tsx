@@ -4,6 +4,7 @@ import { ChevronDown, Check, FolderOpen, FolderPlus, Minus, Search, Square, Tras
 import * as api from "../lib/api";
 import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
+import TabStrip from "./TabStrip";
 import MenuBar from "./MenuBar";
 
 const appWindow = getCurrentWindow();
@@ -39,7 +40,7 @@ function WindowButton({
  * 窗口在 tauri.conf.json 中配置为 decorations: false。
  */
 export default function TitleBar() {
-  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView } = useLibrary();
+  const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView, tabs } = useLibrary();
   const [version, setVersion] = useState("");
   useEffect(() => {
     void api.appInfo().then((i) => setVersion(i.version)).catch(() => {});
@@ -172,16 +173,17 @@ export default function TitleBar() {
       </div>
 
       {/* 全局搜索入口：点击或 Ctrl+K 进入搜索视图 */}
-      <div className="flex flex-1 justify-center">
+      <TabStrip />
+      <div data-tauri-drag-region className={`flex justify-center px-2 ${tabs.length > 0 ? "shrink-0" : "flex-1"}`}>
         <button
           type="button"
           onClick={requestSearchView}
           title="搜索文件名与正文（Ctrl + K）"
-          className="flex h-8 w-[420px] max-w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400 hover:border-gray-300 hover:bg-white"
+          className={`flex h-8 max-w-full items-center ${tabs.length > 0 ? "w-[200px]" : "w-[420px]"} gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400 hover:border-gray-300 hover:bg-white`}
         >
           <Search className="h-4 w-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-left">搜索文档、内容、标签…</span>
-          <kbd className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400">
+          <kbd className={`${tabs.length > 0 ? "hidden" : ""} shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400`}>
             Ctrl + K
           </kbd>
         </button>
