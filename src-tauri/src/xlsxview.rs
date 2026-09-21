@@ -34,6 +34,8 @@ pub struct XSheet {
     pub merges: Vec<[u32; 4]>,
     pub frozen_rows: u32,
     pub frozen_cols: u32,
+    /// 文件里设置的自动筛选范围 [首行, 首列, 末行, 末列]（0 起；首行是表头行）
+    pub auto_filter: Option<[u32; 4]>,
     pub show_grid: bool,
     /// 实际列数 / 已读取行数 / 文件中的总行数
     pub col_count: u32,
@@ -452,6 +454,21 @@ fn parse_sheet(xml: &str, name: &str, shared: &[String], xf_formats: &[String], 
                     sheet.merges.push([r1, c1, r2.min(MAX_ROWS as u32 - 1), c2.min(MAX_COLS as u32 - 1)]);
                 }
             }
+        }
+    }
+
+    // 自动筛选范围：<autoFilter ref="A2:D30"/>（工作表级）
+    if let Some(r) = doc
+        .root_element()
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "autoFilter")
+        .and_then(|n| n.attribute("ref"))
+    {
+        let (a, b) = r.split_once(':').unwrap_or((r, r));
+        let (r1, c1) = col_index(a);
+        let (r2, c2) = col_index(b);
+        if (r1 as usize) < MAX_ROWS && (c1 as usize) < MAX_COLS {
+            sheet.auto_filter = Some([r1, c1, r2.min(MAX_ROWS as u32 - 1), c2.min(MAX_COLS as u32 - 1)]);
         }
     }
 
@@ -964,7 +981,7 @@ mod tests {
                   <row r="1" ht="30"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
                   <row r="2"><c r="A2" s="1"><v>0.256</v></c><c r="B2" s="2"><v>45000</v></c><c r="C2" t="b"><v>1</v></c></row>
                 </sheetData>
-                <mergeCells count="1"><mergeCell ref="A3:C4"/></mergeCells></worksheet>"#),
+                <autoFilter ref="A2:B30"/><mergeCells count="1"><mergeCell ref="A3:C4"/></mergeCells></worksheet>"#),
             ("xl/worksheets/sheet2.xml", r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#),
         ];
         for (n, c) in entries {
@@ -986,6 +1003,7 @@ mod tests {
         assert!(!s.show_grid);
         assert_eq!((s.frozen_rows, s.frozen_cols), (1, 1));
         assert_eq!(s.merges, vec![[2, 0, 3, 2]]);
+        assert_eq!(s.auto_filter, Some([1, 0, 29, 1]), "自动筛选范围 A2:B30");
         assert_eq!(s.col_widths[0], 145.0); // 20 字符 → 145px
         assert_eq!(s.col_widths[2], 0.0); // 隐藏列
         let r1 = &s.rows[0];

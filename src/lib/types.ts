@@ -136,6 +136,8 @@ export interface XSheet {
   merges: [number, number, number, number][];
   frozenRows: number;
   frozenCols: number;
+  /** 文件里的自动筛选范围 [首行, 首列, 末行, 末列]，首行为表头行 */
+  autoFilter: [number, number, number, number] | null;
   showGrid: boolean;
   colCount: number;
   totalRows: number;
