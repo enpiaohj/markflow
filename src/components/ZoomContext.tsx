@@ -7,6 +7,16 @@ export interface ZoomConfig {
   step: number;
   /** 当前主视图是否支持缩放（决定状态栏是否显示控件） */
   visible: boolean;
+  /** 预置缩放档位（状态栏百分比下拉）；未指定时使用通用档位并按 min/max 过滤 */
+  presets?: number[];
+}
+
+/** 通用预置档位（对应 Word 缩放对话框常用值） */
+export const DEFAULT_ZOOM_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+
+export function zoomPresets(config: ZoomConfig): number[] {
+  const list = config.presets ?? DEFAULT_ZOOM_PRESETS;
+  return list.filter((v) => v >= config.min - 1e-6 && v <= config.max + 1e-6);
 }
 
 interface ZoomContextValue {

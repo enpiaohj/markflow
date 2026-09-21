@@ -1,10 +1,18 @@
-import { FolderOpen, FolderPlus, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FolderOpen, FolderPlus, Clock, FileText } from "lucide-react";
 import { useLibrary } from "../components/LibraryContext";
+import * as api from "../lib/api";
 import { formatTime } from "../lib/format";
+import type { RecentFile } from "../lib/types";
 
 /** 「开始」页：最近文档库与快速动作 */
 export default function HomeView() {
-  const { libraries, current, switchToLibrary, openWizard } = useLibrary();
+  const { libraries, current, switchToLibrary, openWizard, pickAndOpenFile, openPath } = useLibrary();
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+
+  useEffect(() => {
+    void api.listRecentFiles().then(setRecentFiles).catch(() => setRecentFiles([]));
+  }, []);
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col px-6 py-10">
@@ -26,6 +34,15 @@ export default function HomeView() {
         >
           <FolderPlus className="h-4 w-4" />
           创建文档库
+        </button>
+        <button
+          type="button"
+          onClick={() => void pickAndOpenFile()}
+          title="直接打开并编辑任意文件（Ctrl + O），无需先建立文档库"
+          className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <FileText className="h-4 w-4" />
+          打开文件…
         </button>
         {libraries.length > 0 && (
           <button
@@ -87,10 +104,37 @@ export default function HomeView() {
         </ul>
       )}
 
+      {recentFiles.length > 0 && (
+        <>
+          <p className="mb-3 mt-8 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+            <FileText className="h-4 w-4 text-gray-400" />
+            最近打开的文件
+          </p>
+          <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {recentFiles.slice(0, 6).map((f) => (
+              <li key={f.path}>
+                <button
+                  type="button"
+                  onClick={() => void openPath(f.path)}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-primary-50/50"
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-gray-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-gray-900">{f.path.replace(/\\/g, "/").split("/").pop()}</span>
+                    <span className="block truncate text-xs text-gray-400">{f.path}</span>
+                  </span>
+                  <span className="shrink-0 text-xs text-gray-400">{formatTime(f.openedAt)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       <p className="mt-auto pt-8 text-center text-xs leading-relaxed text-gray-400">
-        当前为 v0.1：文档库核心（建库、扫描索引、浏览）已就绪。
+        本地优先：文件始终保存在原位置，MarkFlow 只保存索引与元数据。
         <br />
-        原生编辑与全文搜索将按 v0.1–v0.5 路线逐步交付。
+        可通过「文件 → 打开文件」直接编辑任意文件，也可创建文档库获得统一搜索与管理。
       </p>
     </div>
   );

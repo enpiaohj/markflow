@@ -221,7 +221,8 @@ fn row_to_library(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryMeta> {
 
 pub fn list_libraries(conn: &Connection) -> Result<Vec<LibraryMeta>, String> {
     let mut stmt = conn
-        .prepare("SELECT * FROM libraries ORDER BY last_opened_at DESC")
+        .prepare("SELECT * FROM libraries WHERE COALESCE(json_extract(settings_json, '$.adhoc'), 0) != 1
+             ORDER BY last_opened_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], row_to_library)
@@ -474,6 +475,28 @@ fn collect_scan_rows(
     Ok((rows, skipped))
 }
 
+/// 单文件模式：只登记用户明确打开过的文件（不遍历整个文件夹）。
+fn collect_adhoc_rows(root: &Path, names: &[String]) -> Vec<ScanRow> {
+    names
+        .iter()
+        .filter_map(|name| {
+            let meta = std::fs::metadata(root.join(name)).ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some(ScanRow {
+                relative_path: name.clone(),
+                name: name.clone(),
+                parent_path: String::new(),
+                is_dir: false,
+                format: detect_format(name).into(),
+                size: meta.len() as i64,
+                mtime: mtime_ms(&meta),
+            })
+        })
+        .collect()
+}
+
 /// 计算单个文件的提取结果（不访问数据库，可在无锁状态下执行）。
 /// 文本格式按检测到的编码解码；Office 格式走 OOXML 安全解析（office.rs）。
 pub(crate) fn extract_for_index(file_path: &Path, name: &str) -> (String, Option<String>) {
@@ -579,8 +602,12 @@ pub fn scan_prepare(
     exclude: &[String],
     existing: &ExistingMap,
     opts: &ScanOptions<'_>,
+    only_files: Option<&[String]>,
 ) -> Result<Prepared, String> {
-    let (rows, skipped) = collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?;
+    let (rows, skipped) = match only_files {
+        Some(names) => (collect_adhoc_rows(root, names), 0),
+        None => collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?,
+    };
     let mut extracted = std::collections::HashMap::new();
     for (i, row) in rows.iter().enumerate() {
         if let Some(flag) = opts.cancel {
@@ -694,15 +721,30 @@ pub struct ScanOptions<'a> {
 #[cfg(test)]
 pub fn scan_library_with(conn: &Connection, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
     let existing = load_existing(conn, library_id)?;
-    let prepared = scan_prepare(root, exclude, &existing, &opts)?;
+    let prepared = scan_prepare(root, exclude, &existing, &opts, None)?;
     scan_apply(conn, library_id, prepared)
 }
 
 /// 完整扫描（不长期持锁版）：目录遍历与正文提取在无锁状态执行，仅写库时短暂持锁，
 /// 扫描期间其他命令（列目录、搜索、保存）不被阻塞。
 pub fn scan_library_locked(state: &AppState, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
-    let existing = load_existing(&state.0.lock().unwrap(), library_id)?;
-    let prepared = scan_prepare(root, exclude, &existing, &opts)?;
+    let (existing, only) = {
+        let conn = state.0.lock().unwrap();
+        let meta = get_library(&conn, library_id)?;
+        let only = if meta.settings.get("adhoc").and_then(|v| v.as_bool()).unwrap_or(false) {
+            Some(
+                meta.settings
+                    .get("files")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        };
+        (load_existing(&conn, library_id)?, only)
+    };
+    let prepared = scan_prepare(root, exclude, &existing, &opts, only.as_deref())?;
     let conn = state.0.lock().unwrap();
     scan_apply(&conn, library_id, prepared)
 }
@@ -890,7 +932,7 @@ pub fn search_library(conn: &Connection, library_id: &str, query: &str, limit: i
         return rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string());
     }
 
-    // 短查询回退：文件名 LIKE（转义通配符）
+    // 短查询（FTS5 trigram 至少需 3 个字符）回退：文件名 + 正文 LIKE（转义通配符）
     let mut escaped = String::new();
     for ch in q.chars() {
         match ch {
@@ -904,7 +946,9 @@ pub fn search_library(conn: &Connection, library_id: &str, query: &str, limit: i
     let mut stmt = conn
         .prepare(
             "SELECT f.* FROM files f
-             WHERE f.library_id = ?1 AND f.is_dir = 0 AND f.name LIKE '%' || ?2 || '%' ESCAPE '\\'
+             LEFT JOIN extracted_content e ON e.file_id = f.id
+             WHERE f.library_id = ?1 AND f.is_dir = 0
+               AND (f.name LIKE '%' || ?2 || '%' ESCAPE '\\' OR e.text LIKE '%' || ?2 || '%' ESCAPE '\\')
              ORDER BY f.name COLLATE NOCASE
              LIMIT ?3",
         )

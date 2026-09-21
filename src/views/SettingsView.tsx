@@ -7,6 +7,7 @@ import {
   Download,
   Monitor,
   Palette,
+  Pencil,
   Plus,
   ShieldCheck,
   Stamp,
@@ -14,7 +15,9 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { useDialog } from "../components/DialogContext";
 import * as api from "../lib/api";
+import { getAutosave, setAutosave } from "../lib/prefs";
 import type { AiTestResult, ComponentStatus, ProviderConfig } from "../lib/types";
 
 interface SettingSection {
@@ -28,12 +31,14 @@ const sections: SettingSection[] = [
   { name: "常规", description: "启动、最近库、语言、更新", icon: Monitor },
   { name: "外观", description: "浅色 / 深色、密度、字号、页面背景", icon: Palette },
   { name: "文档库", description: "排除规则、索引、缓存、便携元数据", icon: Database },
-  { name: "编辑器", description: "自动保存、换行符、Markdown 方言、快捷键", icon: Braces },
   { name: "审阅", description: "状态、检查规则、交付门禁", icon: Stamp },
 ];
 
 /** 「设置」页：组件与 AI Provider 为实时状态，其余分区占位 */
 export default function SettingsView() {
+  const dialog = useDialog();
+  const [autosave, setAutosaveState] = useState(getAutosave());
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [components, setComponents] = useState<ComponentStatus[] | null>(null);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [adding, setAdding] = useState(false);
@@ -53,18 +58,43 @@ export default function SettingsView() {
     loadProviders();
   }, []);
 
+  function startEdit(p: ProviderConfig) {
+    setEditingId(p.id);
+    setForm({ name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: "" });
+    setAdding(true);
+  }
+
+  function closeForm() {
+    setAdding(false);
+    setEditingId(null);
+    setForm({ name: "", baseUrl: "", model: "", apiKey: "" });
+  }
+
   async function saveProvider() {
-    if (!form.name.trim() || !form.baseUrl.trim() || !form.model.trim() || !form.apiKey.trim()) {
-      alert("请完整填写名称、接口地址、模型与 API Key。");
+    const keyRequired = editingId === null;
+    if (!form.name.trim() || !form.baseUrl.trim() || !form.model.trim() || (keyRequired && !form.apiKey.trim())) {
+      await dialog.alert(
+        keyRequired ? "请完整填写名称、接口地址、模型与 API Key。" : "名称、接口地址与模型不能为空。",
+        "信息不完整",
+      );
       return;
     }
+    if (/^http:\/\//i.test(form.baseUrl.trim()) && !/localhost|127\.0\.0\.1/.test(form.baseUrl)) {
+      const ok = await dialog.confirm({
+        title: "使用明文 HTTP 地址",
+        message: "该接口地址是明文 HTTP：文档内容与 API Key 在传输中可能被窃听。\n除本机服务外，建议改用 https。仍要保存吗？",
+        confirmText: "仍然保存",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     try {
-      await api.aiSaveProvider(form);
-      setForm({ name: "", baseUrl: "", model: "", apiKey: "" });
-      setAdding(false);
+      if (editingId) await api.aiUpdateProvider(editingId, form);
+      else await api.aiSaveProvider(form);
+      closeForm();
       loadProviders();
     } catch (err) {
-      alert(`保存失败：${err}`);
+      await dialog.alert(`保存失败：${err}`, "保存失败");
     }
   }
 
@@ -79,7 +109,13 @@ export default function SettingsView() {
   }
 
   async function deleteProvider(id: string) {
-    if (!confirm("删除该 Provider？其 API Key 将同步从系统凭据库移除。")) return;
+    const ok = await dialog.confirm({
+      title: "删除 Provider",
+      message: "删除该 Provider？其 API Key 将同步从系统凭据库移除。",
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     await api.aiDeleteProvider(id);
     loadProviders();
   }
@@ -174,13 +210,13 @@ export default function SettingsView() {
             type="password"
             value={form.apiKey}
             onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-            placeholder="API Key（保存到 Windows 凭据库，不写入文档库）"
+            placeholder={editingId ? "API Key（留空表示不修改）" : "API Key（保存到 Windows 凭据库，不写入文档库）"}
             className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-primary-500"
           />
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={() => setAdding(false)}
+              onClick={closeForm}
               className="h-8 rounded-lg border border-gray-200 px-3 text-[13px] text-gray-600 hover:bg-gray-50"
             >
               取消
@@ -233,6 +269,14 @@ export default function SettingsView() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => startEdit(p)}
+                    title="编辑"
+                    className="rounded-md p-1.5 text-gray-300 hover:bg-gray-100 hover:text-gray-600"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void deleteProvider(p.id)}
                     title="删除（密钥同步移除）"
                     className="rounded-md p-1.5 text-gray-300 hover:bg-red-50 hover:text-red-500"
@@ -254,6 +298,31 @@ export default function SettingsView() {
         应用设置
       </p>
       <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
+        <li className="flex items-center gap-3 px-4 py-3.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
+            <Braces className="h-4.5 w-4.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-gray-900">自动保存</span>
+            <span className="block text-xs text-gray-500">
+              编辑器停止输入 3 秒后自动保存（每次保存前仍会自动创建历史快照；异常退出的草稿始终会保留）
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autosave}
+            onClick={() => {
+              setAutosave(!autosave);
+              setAutosaveState(!autosave);
+            }}
+            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${autosave ? "bg-primary-600" : "bg-gray-300"}`}
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${autosave ? "left-[18px]" : "left-0.5"}`}
+            />
+          </button>
+        </li>
         {sections.map(({ name, description, icon: Icon }) => (
           <li
             key={name}

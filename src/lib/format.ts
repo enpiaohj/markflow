@@ -65,3 +65,14 @@ export const EDITABLE_FORMATS: ReadonlySet<string> = new Set([
   "config",
   "csv",
 ]);
+
+/** 双击 / 打开文件时的统一路由：内置查看器、编辑器，或交给系统应用 */
+export type OpenRoute = "pdf" | "office" | "image" | "editor" | "system";
+
+export function openRouteFor(format: string): OpenRoute {
+  if (format === "pdf") return "pdf";
+  if (format === "word" || format === "excel" || format === "powerpoint") return "office";
+  if (format === "image") return "image";
+  if (EDITABLE_FORMATS.has(format)) return "editor";
+  return "system";
+}

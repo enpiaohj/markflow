@@ -91,8 +91,8 @@ export default function SearchView() {
         </button>
       </div>
       <p className="mt-2 text-xs text-gray-400">
-        ≥ 3 个字符：检索文件名与正文（Markdown、文本、代码、JSON、YAML、CSV 等；
-        Office/PDF 正文索引按路线交付）；不足 3 个字符仅匹配文件名。
+        检索文件名与正文（Markdown、文本、代码、JSON、YAML、CSV 等；Office/PDF 正文索引按路线交付）。
+        不足 3 个字符时使用逐文件的子串匹配，大库中速度会慢于长关键词。
       </p>
 
       {error && (
@@ -117,7 +117,7 @@ export default function SearchView() {
             <p className="mt-3 text-sm">未找到与「{lastQuery}」匹配的内容</p>
             <p className="mt-1 text-xs text-gray-400">
               {lastQuery.length < 3
-                ? "短关键词仅匹配文件名，试试更长的关键词以检索正文"
+                ? "短关键词匹配范围有限，试试更长的关键词可获得更完整的正文检索结果"
                 : "请检查关键词，或确认文件已完成索引"}
             </p>
           </div>

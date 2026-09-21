@@ -10,6 +10,7 @@ mod fsops;
 mod library;
 mod ocr;
 mod office;
+mod openfile;
 mod selfwrite;
 mod sensitive;
 mod tasks;
@@ -20,6 +21,41 @@ use library::{AppState, CreateLibraryRequest};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use watch::WatchState;
+
+/// 打开任意文件：定位所属文档库，或进入单文件模式。
+#[tauri::command]
+fn open_file_path(state: State<'_, AppState>, path: String) -> Result<openfile::OpenTarget, String> {
+    let conn = state.0.lock().unwrap();
+    let target = openfile::resolve(&conn, &path)?;
+    openfile::push_recent(&conn, &openfile::normalize(std::path::Path::new(&path)));
+    Ok(target)
+}
+
+/// 取走启动参数 / 二次启动传来的待打开文件路径（前端就绪后调用一次）。
+#[tauri::command]
+fn take_pending_open_paths(pending: State<'_, openfile::PendingOpen>) -> Vec<String> {
+    std::mem::take(&mut *pending.0.lock().unwrap())
+}
+
+/// 最近打开的文件（仅保留仍存在的）。
+#[tauri::command]
+fn list_recent_files(state: State<'_, AppState>) -> Vec<openfile::RecentFile> {
+    openfile::read_recent(&state.0.lock().unwrap())
+        .into_iter()
+        .filter(|r| std::path::Path::new(&r.path).is_file())
+        .collect()
+}
+
+/// 文件当前磁盘 mtime（窗口聚焦时检测外部修改）。
+#[tauri::command]
+fn stat_file_mtime(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<i64, String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    Ok(library::file_mtime(&std::path::Path::new(&root).join(relative_path)))
+}
 
 /// 返回应用基础信息，供前端关于信息使用。
 #[tauri::command]
@@ -922,6 +958,20 @@ fn restore_file_version(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // 二次启动（如双击 .md 文件）：把路径交给已运行的实例并聚焦窗口
+            let paths = openfile::paths_from_args(args.into_iter().skip(1));
+            if !paths.is_empty() {
+                if let Some(pending) = app.try_state::<openfile::PendingOpen>() {
+                    pending.0.lock().unwrap().extend(paths.clone());
+                }
+                let _ = app.emit("open-paths", paths);
+            }
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -929,10 +979,17 @@ pub fn run() {
             app.manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(conn))));
             app.manage(WatchState(std::sync::Mutex::new(None)));
             app.manage(tasks::TaskManager::default());
+            app.manage(openfile::PendingOpen(std::sync::Mutex::new(openfile::paths_from_args(
+                std::env::args().skip(1),
+            ))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            open_file_path,
+            take_pending_open_paths,
+            list_recent_files,
+            stat_file_mtime,
             list_libraries,
             quick_scan_library,
             create_library,

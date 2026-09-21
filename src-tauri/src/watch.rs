@@ -57,6 +57,9 @@ pub fn start_watching(
     }
 
     let meta = library::get_library(conn, &library_id)?;
+    if crate::openfile::is_adhoc_library(&meta) {
+        return Ok(()); // 单文件模式不监听整个文件夹（外部修改由窗口聚焦时检测）
+    }
     let root = std::path::PathBuf::from(&meta.root_path);
     if !root.is_dir() {
         return Err(format!("文档库文件夹不存在，停止监听: {}", meta.root_path));

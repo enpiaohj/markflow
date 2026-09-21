@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronDown, Check, FolderOpen, FolderPlus, Minus, Search, Square, Trash2, X } from "lucide-react";
+import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
+import MenuBar from "./MenuBar";
 
 const appWindow = getCurrentWindow();
 
@@ -37,6 +39,7 @@ function WindowButton({
  */
 export default function TitleBar() {
   const { libraries, current, switchToLibrary, removeLibrary, openWizard, closeCurrentLibrary, requestSearchView } = useLibrary();
+  const dialog = useDialog();
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function handleSwitch(id: string) {
@@ -49,7 +52,13 @@ export default function TitleBar() {
   }
 
   async function handleRemove(id: string) {
-    if (!confirm("确定从 MarkFlow 移除该文档库的索引记录吗？\n\n磁盘上的原文件不会被删除或修改。")) return;
+    const ok = await dialog.confirm({
+      title: "移除文档库",
+      message: "确定从 MarkFlow 移除该文档库的索引记录吗？\n\n磁盘上的原文件不会被删除或修改。",
+      confirmText: "移除",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await removeLibrary(id);
     } catch (err) {
@@ -69,12 +78,16 @@ export default function TitleBar() {
           MarkFlow
         </span>
         <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+        <MenuBar />
+        <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
         <button
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
           className="flex max-w-[220px] items-center gap-1.5 rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
         >
-          <span className="truncate">{current ? current.name : "未打开文档库"}</span>
+          <span className="truncate">
+            {current ? (current.settings?.adhoc ? `单文件 · ${current.name}` : current.name) : "未打开文档库"}
+          </span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
         </button>
 
