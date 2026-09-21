@@ -37,6 +37,16 @@ export function takePendingOpenPaths(): Promise<string[]> {
   return invoke("take_pending_open_paths");
 }
 
+/** LibreOffice 是否可用（轻量探测） */
+export function libreofficeAvailable(): Promise<boolean> {
+  return invoke("libreoffice_available");
+}
+
+/** 记录最近打开（库内文档） */
+export function recordRecentOpen(libraryId: string, relativePath: string): Promise<void> {
+  return invoke("record_recent_open", { libraryId, relativePath });
+}
+
 export function listRecentFiles(): Promise<RecentFile[]> {
   return invoke("list_recent_files");
 }

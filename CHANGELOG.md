@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- 标题栏左上角显示应用版本号（原在状态栏右下角）。
+- 标题栏显示当前打开的文档名并提供关闭按钮；新增「文件 → 关闭文档」与 `Ctrl+W`。
+- 「历史」视图新增「最近打开的文档」（点击直接打开，不依赖文档库）；
+  库内文档通过界面打开时也会记入最近打开。
+
+### Fixed
+
+- 打开 Office 文档（以及设置页、交付页）时会自动弹出 Edge 浏览器并抢占前台：
+  组件检测曾执行 `msedge.exe --version`，而 Windows 上 Edge 不会打印版本而是直接启动浏览器窗口。
+  现在改为读取安装目录的版本号文件夹，不再执行 Edge；Office 预览只做轻量的 LibreOffice 存在性检查。
+- 调用 Pandoc / LibreOffice 等外部命令时不再闪现控制台黑窗（`CREATE_NO_WINDOW`）。
+- 「历史」视图在没有保存过文件时整页为空，缺少说明。
+
 ## [0.4.0] - 2026-09-21
 
 ### Added

@@ -72,10 +72,32 @@ pub fn list_components() -> Vec<ComponentStatus> {
             name: "msedge".into(),
             label: "Microsoft Edge（PDF 输出管线）".into(),
             found: edge.is_some(),
-            version: edge.as_ref().map(|p| probe_version(p, &["--version"])).unwrap_or_default(),
+            // 注意：绝不能执行 `msedge.exe --version`——Windows 上 Edge 不会打印版本，而是直接启动浏览器窗口。
+            version: edge.as_ref().map(|p| edge_version(p)).unwrap_or_default(),
             path: edge.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
         },
     ]
+}
+
+/// 读取 Edge 版本而不启动它：安装目录下有以版本号命名的文件夹（如 `120.0.2210.91`），取最大者。
+pub fn edge_version(exe: &Path) -> String {
+    let Some(dir) = exe.parent() else { return String::new() };
+    let mut best: Option<(Vec<u32>, String)> = None;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let parts: Vec<u32> = name.split('.').filter_map(|p| p.parse().ok()).collect();
+            if parts.len() == 4 && name.split('.').count() == 4 && best.as_ref().map(|(b, _)| &parts > b).unwrap_or(true) {
+                best = Some((parts, name));
+            }
+        }
+    }
+    best.map(|(_, n)| n).unwrap_or_default()
+}
+
+/// LibreOffice 是否可用（不执行任何程序，仅探测文件）。
+pub fn libreoffice_available() -> bool {
+    detect_soffice().is_some()
 }
 
 /// 带超时地运行外部命令并返回 stdout 首行（Sidecar 调用一律参数数组，不拼 Shell）。
@@ -98,6 +120,12 @@ pub fn probe_version(exe: &Path, args: &[&str]) -> String {
 pub fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Result<Vec<u8>, String> {
     use std::io::Read;
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // 不为子进程创建控制台窗口（发布版是 GUI 程序，否则每次调用 Pandoc / LibreOffice 都会闪一个黑窗）
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
     let mut child = cmd.spawn().map_err(|e| format!("启动组件失败: {e}"))?;
     let mut stdout = child.stdout.take().expect("stdout piped");
     let mut stderr = child.stderr.take().expect("stderr piped");
@@ -164,4 +192,20 @@ fn known_locations(patterns: &[&str]) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    #[test]
+    fn edge_version_read_from_folder_names_without_running_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("119.0.2151.44")).unwrap();
+        std::fs::create_dir_all(dir.path().join("120.0.2210.91")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Installer")).unwrap();
+        let exe = dir.path().join("msedge.exe");
+        std::fs::write(&exe, b"not a real exe").unwrap(); // 若被执行会失败，证明没有执行
+        assert_eq!(edge_version(&exe), "120.0.2210.91");
+    }
 }

@@ -245,6 +245,28 @@ fn list_library_files(
     library::list_all_files(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(500))
 }
 
+/// LibreOffice 是否可用（轻量探测，不启动任何程序；Office 预览用）。
+#[tauri::command]
+fn libreoffice_available() -> bool {
+    component_manager::libreoffice_available()
+}
+
+/// 记录「最近打开」（库内文档通过界面打开时调用；打开任意文件已在 open_file_path 中记录）。
+#[tauri::command]
+fn record_recent_open(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().unwrap();
+    let root = library::get_library(&conn, &library_id)?.root_path;
+    let abs = std::path::Path::new(&root).join(&relative_path);
+    if abs.is_file() {
+        openfile::push_recent(&conn, &openfile::normalize(&abs));
+    }
+    Ok(())
+}
+
 /// 可选组件（Pandoc / LibreOffice）健康状态。
 #[tauri::command]
 fn list_components() -> Vec<component_manager::ComponentStatus> {
@@ -989,6 +1011,8 @@ pub fn run() {
             open_file_path,
             take_pending_open_paths,
             list_recent_files,
+            libreoffice_available,
+            record_recent_open,
             stat_file_mtime,
             list_libraries,
             quick_scan_library,

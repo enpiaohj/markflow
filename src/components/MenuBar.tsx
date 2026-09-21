@@ -28,6 +28,7 @@ const SHORTCUTS_HELP = [
   "Ctrl + O　打开文件",
   "Ctrl + N　新建文档（在当前文档库根目录）",
   "Ctrl + S　保存",
+  "Ctrl + W　关闭当前文档",
   "Ctrl + K　搜索",
   "Ctrl + + / Ctrl + − / Ctrl + 0　放大 / 缩小 / 实际大小",
   "Ctrl + 鼠标滚轮　缩放文档视图",
@@ -53,6 +54,9 @@ export default function MenuBar() {
     requestSearchView,
     closeCurrentLibrary,
     openInEditor,
+    viewerFile,
+    deliveryOpen,
+    closeDocument,
   } = useLibrary();
   const dialog = useDialog();
   const { config: zoom, zoomIn, zoomOut, reset } = useZoom();
@@ -96,6 +100,9 @@ export default function MenuBar() {
       if (k === "o") {
         e.preventDefault();
         void pickAndOpenFile();
+      } else if (k === "w") {
+        e.preventDefault();
+        void closeDocument();
       } else if (k === "n") {
         e.preventDefault();
         void newDocument();
@@ -128,7 +135,7 @@ export default function MenuBar() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("wheel", onWheel);
     };
-  }, [pickAndOpenFile, newDocument, zoom.visible, zoomIn, zoomOut, reset]);
+  }, [pickAndOpenFile, newDocument, closeDocument, zoom.visible, zoomIn, zoomOut, reset]);
 
   // 打开「文件」菜单时刷新最近文件
   useEffect(() => {
@@ -174,6 +181,7 @@ export default function MenuBar() {
         { label: "新建文档", shortcut: "Ctrl+N", onClick: () => void newDocument(), disabled: !current },
         { separator: true },
         { label: "保存", shortcut: "Ctrl+S", onClick: save, disabled: !openFile },
+        { label: "关闭文档", shortcut: "Ctrl+W", onClick: () => void closeDocument(), disabled: !openFile && !viewerFile && !deliveryOpen },
         { label: "关闭当前文档库", onClick: closeCurrentLibrary, disabled: !current },
         { separator: true },
         { label: "退出", shortcut: "Alt+F4", onClick: () => void getCurrentWindow().close() },

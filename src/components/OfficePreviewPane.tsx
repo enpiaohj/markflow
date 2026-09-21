@@ -37,9 +37,7 @@ export default function OfficePreviewPane() {
   const rel = viewerFile?.relativePath ?? "";
 
   useEffect(() => {
-    void api.listComponents().then((list) => {
-      setHasLibreOffice(list.find((c) => c.name === "libreoffice")?.found ?? false);
-    });
+    void api.libreofficeAvailable().then(setHasLibreOffice).catch(() => setHasLibreOffice(false));
     configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1 });
     return () => configureZoom({ visible: false });
   }, [configureZoom]);

@@ -39,6 +39,8 @@ interface LibraryContextValue {
   wizardOpen: boolean;
   /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
   viewRequest: { target: ViewRequestTarget; nonce: number };
+  /** 关闭当前打开的文档（编辑器 / 查看器 / 交付中心）；有未保存修改会先确认 */
+  closeDocument: () => Promise<void>;
   /** 编辑器中有未保存修改时弹出确认；返回 true 表示可以继续（已放弃修改或无修改） */
   confirmDiscard: () => Promise<boolean>;
   /** 打开任意文件（库内定位 / 单文件模式），按格式路由到编辑器或查看器 */
@@ -279,10 +281,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     [confirmDiscard],
   );
 
+  const currentIdRef = useRef<string | null>(null);
+  currentIdRef.current = current?.id ?? null;
+
+  const closeDocument = useCallback(async () => {
+    if (!(await confirmDiscard())) return;
+    setOpenFile(null);
+    setViewerFile(null);
+    setDeliveryOpen(false);
+    setEditorDirty(false);
+  }, [confirmDiscard]);
+
   const openInEditorGuarded = useCallback(
     (relativePath: string) => {
       void confirmDiscard().then((ok) => {
         if (!ok) return;
+        if (currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
         setFocusFile(null);
         setViewerFile(null);
         setDeliveryOpen(false);
@@ -296,6 +310,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
       void confirmDiscard().then((ok) => {
         if (!ok) return;
+        if (kind !== "hifi" && currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
         setOpenFile(null);
         setDeliveryOpen(false);
         setFocusFile(null);
@@ -304,9 +319,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     },
     [confirmDiscard],
   );
-
-  const currentIdRef = useRef<string | null>(null);
-  currentIdRef.current = current?.id ?? null;
 
   const openPath = useCallback(
     async (path: string) => {
@@ -384,6 +396,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       editorDirty,
       setEditorDirty,
       confirmDiscard,
+      closeDocument,
       openPath,
       pickAndOpenFile,
       deliveryOpen,
@@ -424,7 +437,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       closeDelivery: () => setDeliveryOpen(false),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;
