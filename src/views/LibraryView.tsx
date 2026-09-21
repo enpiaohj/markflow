@@ -345,13 +345,11 @@ export default function LibraryView() {
       return;
     }
     pendingRef.current = { libId: lib.id, run };
-    void activateLibrary(lib.id).then(() => {
-      // 用户取消（有未保存修改时放弃切换）→ 清掉待办
-      if (pendingRef.current?.libId === lib.id && currentIdNow.current !== lib.id) pendingRef.current = null;
+    void activateLibrary(lib.id).catch((err) => {
+      if (pendingRef.current?.libId === lib.id) pendingRef.current = null;
+      void appDialog.alert(String(err), "无法打开文档库");
     });
   }
-  const currentIdNow = useRef<string | undefined>(undefined);
-  currentIdNow.current = current?.id;
   const currentDirRef = useRef(currentDir);
   currentDirRef.current = currentDir;
 

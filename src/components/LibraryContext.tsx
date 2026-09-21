@@ -723,21 +723,29 @@ export function useLibrary(): LibraryContextValue {
   const { tab, active } = scope ?? { tab: null, active: true };
   const { closeTab, showMain, activateTab, dirtyTabs } = ctx;
   const setDirty = useContext(SetTabDirtyContext);
-  return useMemo(() => {
-    if (!tab) return ctx;
-    const isEditor = tab.kind === "editor";
+  // openFile / viewerFile 对象引用必须只随标签本身变化：各面板把它们放在 effect 依赖里，引用变化会触发重新加载并丢掉未保存的编辑
+  const view = useMemo(() => {
+    if (!tab) return null;
     const isViewer = tab.kind !== "editor" && tab.kind !== "delivery";
+    return {
+      setEditorDirty: (dirty: boolean) => setDirty(tab.id, dirty),
+      openFile: tab.kind === "editor" ? { relativePath: tab.relativePath, nonce: tab.nonce } : null,
+      viewerFile: isViewer
+        ? { relativePath: tab.relativePath, kind: tab.kind as "pdf" | "office" | "hifi" | "image", nonce: tab.nonce, bytes: tab.bytes, preferText: tab.preferText, forceBuiltin: tab.forceBuiltin }
+        : null,
+    };
+  }, [tab, setDirty]);
+  return useMemo(() => {
+    if (!tab || !view) return ctx;
     return {
       ...ctx,
       current: tab.lib,
       tabActive: active,
-      openFile: isEditor ? { relativePath: tab.relativePath, nonce: tab.nonce } : null,
-      viewerFile: isViewer
-        ? { relativePath: tab.relativePath, kind: tab.kind as "pdf" | "office" | "hifi" | "image", nonce: tab.nonce, bytes: tab.bytes, preferText: tab.preferText, forceBuiltin: tab.forceBuiltin }
-        : null,
+      openFile: view.openFile,
+      viewerFile: view.viewerFile,
       deliveryOpen: tab.kind === "delivery",
       editorDirty: dirtyTabs.has(tab.id),
-      setEditorDirty: (dirty: boolean) => setDirty(tab.id, dirty),
+      setEditorDirty: view.setEditorDirty,
       // 标签内的「返回」只是回到主视图，标签保留；真正关闭用标签页上的 ×
       confirmDiscard: async () => true,
       closeFile: showMain,
@@ -747,7 +755,7 @@ export function useLibrary(): LibraryContextValue {
       activateTab,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, tab, active, dirtyTabs, setDirty, closeTab, showMain, activateTab]);
+  }, [ctx, tab, view, active, dirtyTabs, setDirty, closeTab, showMain, activateTab]);
 }
 
 const SetTabDirtyContext = createContext<(id: string, dirty: boolean) => void>(() => {});
