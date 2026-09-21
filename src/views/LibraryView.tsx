@@ -20,6 +20,7 @@ import {
   Check,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import LibraryManagePanel from "../components/LibraryManagePanel";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
@@ -301,7 +302,7 @@ function LibrarySection({
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { libraries, openManager, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
+  const { libraries, managerOpen, openManager, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, activateLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, closeTabsForPath } = useLibrary();
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [layout, setLayout] = useState(getLibraryLayout());
@@ -615,7 +616,9 @@ export default function LibraryView() {
     <div className="flex h-full min-h-0">
       {/* 左侧：库信息、智能集合、目录树 */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
-        {layout === "selector" ? (
+        {managerOpen ? (
+          <LibraryManagePanel />
+        ) : layout === "selector" ? (
           <>
             {/* 文档库选择器：一次只显示一个库的目录树 */}
             <div className="relative border-b border-gray-100 px-2 py-2">
