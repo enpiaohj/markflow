@@ -16,6 +16,7 @@ import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import { officeKind } from "../lib/format";
 import { useExternalChange } from "../lib/useExternalChange";
+import XlsxGrid from "./office/XlsxGrid";
 import type { OfficePreview } from "../lib/types";
 
 /**
@@ -62,6 +63,13 @@ export default function OfficePreviewPane() {
 
   useEffect(() => {
     if (!current || !viewerFile || viewerFile.kind !== "office") return;
+    // Excel 使用原生表格视图（自带解析），不需要文本预览数据
+    if (officeKind(viewerFile.relativePath) === "excel") {
+      setPreview(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -174,7 +182,9 @@ export default function OfficePreviewPane() {
         <span className="h-4 w-px bg-gray-200" />
         <FileSpreadsheet className="h-4 w-4 shrink-0 text-gray-400" />
         <span className="min-w-0 truncate text-[13px] font-medium text-gray-800">{rel}</span>
-        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">文本快速预览</span>
+        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">
+          {officeKind(rel) === "excel" ? "原生表格" : "文本快速预览"}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           {preview?.kind === "docx" && (
             <button
@@ -197,7 +207,7 @@ export default function OfficePreviewPane() {
               className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
               {hifiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              版式预览
+              {officeKind(rel) === "excel" ? "打印版式预览" : "版式预览"}
             </button>
           )}
           <button
@@ -299,7 +309,9 @@ export default function OfficePreviewPane() {
 
       {/* 内容 */}
       <div className="min-h-0 flex-1 overflow-auto" style={{ zoom: zoomConfig.value }}>
-        {loading ? (
+        {officeKind(rel) === "excel" ? (
+          <XlsxGrid libraryId={current.id} relativePath={rel} reloadKey={reloadNonce} />
+        ) : loading ? (
           <div className="flex h-full flex-col items-center justify-center text-gray-400">
             <Loader2 className="h-6 w-6 animate-spin" />
             <p className="mt-3 text-sm">正在解析 Office 文档…</p>

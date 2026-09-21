@@ -111,6 +111,51 @@ export type OfficePreview =
   | { kind: "xlsx"; sheets: SheetPreview[] }
   | { kind: "pptx"; slides: SlidePreview[] };
 
+/** XLSX 原生表格视图 */
+export interface XlsxView {
+  sheets: XSheet[];
+  styles: XStyle[];
+}
+
+export interface XSheet {
+  name: string;
+  rows: XRow[];
+  colWidths: number[];
+  merges: [number, number, number, number][];
+  frozenRows: number;
+  frozenCols: number;
+  showGrid: boolean;
+  colCount: number;
+  totalRows: number;
+  truncated: boolean;
+}
+
+export interface XRow {
+  r: number;
+  h: number | null;
+  cells: XCell[];
+}
+
+export interface XCell {
+  c: number;
+  v: string;
+  s: number;
+  num: boolean;
+}
+
+export interface XStyle {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  color: string | null;
+  bg: string | null;
+  size: number | null;
+  align: string | null;
+  valign: string | null;
+  wrap: boolean;
+  border: number;
+}
+
 export interface DocxHeading {
   level: number;
   text: string;

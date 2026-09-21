@@ -17,6 +17,7 @@ import type {
   OfficePreview,
   AiChatOutcome,
   OpenTarget,
+  XlsxView,
   RecentFile,
   LibraryMeta,
   QuickScanResult,
@@ -45,6 +46,11 @@ export function officeHifiEngine(relativePath: string): Promise<"office" | "libr
 /** LibreOffice 是否可用（轻量探测） */
 export function libreofficeAvailable(): Promise<boolean> {
   return invoke("libreoffice_available");
+}
+
+/** XLSX 原生表格视图（样式 / 列宽 / 合并 / 冻结窗格 / 数字格式） */
+export function getXlsxView(libraryId: string, relativePath: string): Promise<XlsxView> {
+  return invoke("get_xlsx_view", { libraryId, relativePath });
 }
 
 /** 预热：选中 Word / PowerPoint 文件时后台提前生成版式预览缓存 */

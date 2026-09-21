@@ -17,6 +17,7 @@ mod sensitive;
 mod tasks;
 mod textenc;
 mod watch;
+mod xlsxview;
 
 use library::{AppState, CreateLibraryRequest};
 use std::path::PathBuf;
@@ -364,6 +365,19 @@ async fn office_hifi_engine(relative_path: String) -> String {
     })
     .await
     .unwrap_or_default()
+}
+
+/// XLSX 原生表格视图（样式 / 列宽 / 合并 / 冻结窗格 / 数字格式），不依赖 Office 或 LibreOffice。
+#[tauri::command]
+async fn get_xlsx_view(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<xlsxview::XlsxView, String> {
+    let path = library_file_path(&state, &library_id, &relative_path)?;
+    tauri::async_runtime::spawn_blocking(move || xlsxview::load(&path))
+        .await
+        .map_err(|e| format!("解析任务失败: {e}"))?
 }
 
 /// 预热：选中 Office 文件时在后台提前导出并缓存版式预览（失败静默，不影响后续正式打开）。
@@ -1084,6 +1098,7 @@ pub fn run() {
             libreoffice_available,
             office_hifi_engine,
             prewarm_office_preview,
+            get_xlsx_view,
             record_recent_open,
             stat_file_mtime,
             list_libraries,
