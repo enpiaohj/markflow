@@ -125,6 +125,16 @@ export default function LibraryView() {
   const [list, setList] = useState<FileEntry[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "name", asc: true });
   const [selected, setSelected] = useState<FileEntry | null>(null);
+
+  // 预热：选中 Word / PowerPoint 后稍等片刻（避免快速浏览时频繁触发），后台提前生成版式预览缓存
+  useEffect(() => {
+    if (!current || !selected || selected.isDir) return;
+    if (selected.format !== "word" && selected.format !== "powerpoint") return;
+    const t = window.setTimeout(() => {
+      void api.prewarmOfficePreview(current.id, selected.relativePath).catch(() => {});
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [current, selected]);
   /** 右键菜单位置与目标 */
   const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null);
   /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动 */

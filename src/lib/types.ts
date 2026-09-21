@@ -107,9 +107,71 @@ export interface VersionInfo {
 
 /** Office 快速预览（对应 Rust office.rs，按 kind 判别） */
 export type OfficePreview =
-  | { kind: "docx"; paragraphs: string[] }
+  | { kind: "docx"; paragraphs: string[]; headings: DocxHeading[] }
   | { kind: "xlsx"; sheets: SheetPreview[] }
   | { kind: "pptx"; slides: SlidePreview[] };
+
+/** PowerPoint 逐页图片导出 */
+export interface SlidesMeta {
+  key: string;
+  count: number;
+  width: number;
+  height: number;
+}
+
+export interface SlidesProgress extends SlidesMeta {
+  ready: number;
+}
+
+/** XLSX 原生表格视图 */
+export interface XlsxView {
+  sheets: XSheet[];
+  styles: XStyle[];
+}
+
+export interface XSheet {
+  name: string;
+  rows: XRow[];
+  colWidths: number[];
+  merges: [number, number, number, number][];
+  frozenRows: number;
+  frozenCols: number;
+  showGrid: boolean;
+  colCount: number;
+  totalRows: number;
+  truncated: boolean;
+}
+
+export interface XRow {
+  r: number;
+  h: number | null;
+  cells: XCell[];
+}
+
+export interface XCell {
+  c: number;
+  v: string;
+  s: number;
+  num: boolean;
+}
+
+export interface XStyle {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  color: string | null;
+  bg: string | null;
+  size: number | null;
+  align: string | null;
+  valign: string | null;
+  wrap: boolean;
+  border: number;
+}
+
+export interface DocxHeading {
+  level: number;
+  text: string;
+}
 
 export interface SheetPreview {
   name: string;

@@ -24,12 +24,20 @@ const MAX_TEXT_CHARS: usize = 500_000;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum OfficePreview {
-    /// Word：段落流
-    Docx { paragraphs: Vec<String> },
+    /// Word：段落流 + 目录（标题）
+    Docx { paragraphs: Vec<String>, headings: Vec<Heading> },
     /// Excel：工作表网格
     Xlsx { sheets: Vec<SheetPreview> },
     /// PowerPoint：幻灯片文本
     Pptx { slides: Vec<SlidePreview> },
+}
+
+/// 文档目录项（来自标题样式 / 大纲级别）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Heading {
+    pub level: u8,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,7 +73,7 @@ pub fn preview(path: &Path, format: &str) -> Result<OfficePreview, String> {
 /// 提取纯文本（写入 extracted_content 与 FTS）。
 pub fn extract_text(path: &Path, format: &str) -> Result<String, String> {
     let text = match preview(path, format)? {
-        OfficePreview::Docx { paragraphs } => paragraphs.join("\n"),
+        OfficePreview::Docx { paragraphs, .. } => paragraphs.join("\n"),
         OfficePreview::Xlsx { sheets } => {
             let mut out = String::new();
             for sheet in sheets {
@@ -98,10 +106,37 @@ pub fn extract_text(path: &Path, format: &str) -> Result<String, String> {
 // DOCX：word/document.xml 中的 w:p / w:t
 // ---------------------------------------------------------------------------
 
+/// styles.xml：样式 id → 标题级别（按样式名 heading N / 标题 N 识别，兼容中文版 Word 的数字样式 id）。
+fn docx_heading_styles(path: &Path) -> HashMap<String, u8> {
+    let mut map = HashMap::new();
+    let Ok(xml) = read_zip_entry(path, "word/styles.xml") else { return map };
+    let Ok(doc) = roxmltree::Document::parse(&xml) else { return map };
+    for style in doc.descendants().filter(|n| is_w_tag(*n, "style")) {
+        let Some(id) = style.attribute((W_NS, "styleId")) else { continue };
+        let name = style
+            .children()
+            .find(|c| is_w_tag(*c, "name"))
+            .and_then(|c| c.attribute((W_NS, "val")))
+            .unwrap_or("")
+            .to_lowercase();
+        let level = name
+            .strip_prefix("heading ")
+            .or_else(|| name.strip_prefix("标题 "))
+            .or_else(|| name.strip_prefix("标题"))
+            .and_then(|n| n.trim().parse::<u8>().ok());
+        if let Some(l) = level.filter(|l| (1..=9).contains(l)) {
+            map.insert(id.to_string(), l);
+        }
+    }
+    map
+}
+
 fn docx_preview(path: &Path) -> Result<OfficePreview, String> {
     let xml = read_zip_entry(path, "word/document.xml")?;
     let doc = roxmltree::Document::parse(&xml).map_err(|e| format!("document.xml 解析失败: {e}"))?;
+    let heading_styles = docx_heading_styles(path);
     let mut paragraphs = Vec::new();
+    let mut headings: Vec<Heading> = Vec::new();
     // 只处理 WordprocessingML 命名空间下的 w:p 段落
     for node in doc.descendants() {
         if !is_w_tag(node, "p") {
@@ -121,10 +156,27 @@ fn docx_preview(path: &Path) -> Result<OfficePreview, String> {
             }
         }
         if !text.trim().is_empty() {
+            // 标题：段落样式命中标题样式，或段落自带大纲级别 w:outlineLvl（0 起）
+            let ppr = node.children().find(|c| is_w_tag(*c, "pPr"));
+            let by_style = ppr
+                .and_then(|p| p.children().find(|c| is_w_tag(*c, "pStyle")))
+                .and_then(|s| s.attribute((W_NS, "val")))
+                .and_then(|id| heading_styles.get(id).copied());
+            let by_outline = ppr
+                .and_then(|p| p.children().find(|c| is_w_tag(*c, "outlineLvl")))
+                .and_then(|o| o.attribute((W_NS, "val")))
+                .and_then(|v| v.parse::<u8>().ok())
+                .filter(|l| *l < 9)
+                .map(|l| l + 1);
+            if let Some(level) = by_style.or(by_outline) {
+                if headings.len() < 300 {
+                    headings.push(Heading { level, text: text.trim().chars().take(120).collect() });
+                }
+            }
             paragraphs.push(text);
         }
     }
-    Ok(OfficePreview::Docx { paragraphs })
+    Ok(OfficePreview::Docx { paragraphs, headings })
 }
 
 // ---------------------------------------------------------------------------
@@ -420,9 +472,45 @@ mod tests {
         assert!(text.contains("数据备份与恢复需求说明"));
         assert!(text.contains("负载均衡通道分发"));
         match preview(&path, "word").unwrap() {
-            OfficePreview::Docx { paragraphs } => {
+            OfficePreview::Docx { paragraphs, .. } => {
                 assert_eq!(paragraphs.len(), 2);
                 assert!(paragraphs[1].contains('\t'));
+            }
+            _ => panic!("应为 Docx 预览"),
+        }
+    }
+
+    #[test]
+    fn docx_headings_from_style_names_and_outline_levels() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("目录.docx");
+        build_zip(
+            &path,
+            &[
+                (
+                    "word/styles.xml",
+                    r#"<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                      <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>
+                      <w:style w:type="paragraph" w:styleId="2"><w:name w:val="标题 2"/></w:style>
+                      <w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
+                    </w:styles>"#,
+                ),
+                (
+                    "word/document.xml",
+                    r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+                      <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 概述</w:t></w:r></w:p>
+                      <w:p><w:pPr><w:pStyle w:val="Normal"/></w:pPr><w:r><w:t>正文段落</w:t></w:r></w:p>
+                      <w:p><w:pPr><w:pStyle w:val="2"/></w:pPr><w:r><w:t>1.1 背景</w:t></w:r></w:p>
+                      <w:p><w:pPr><w:outlineLvl w:val="2"/></w:pPr><w:r><w:t>1.1.1 细节</w:t></w:r></w:p>
+                    </w:body></w:document>"#,
+                ),
+            ],
+        );
+        match preview(&path, "word").unwrap() {
+            OfficePreview::Docx { headings, paragraphs } => {
+                assert_eq!(paragraphs.len(), 4);
+                let got: Vec<(u8, &str)> = headings.iter().map(|h| (h.level, h.text.as_str())).collect();
+                assert_eq!(got, vec![(1, "第一章 概述"), (2, "1.1 背景"), (3, "1.1.1 细节")]);
             }
             _ => panic!("应为 Docx 预览"),
         }

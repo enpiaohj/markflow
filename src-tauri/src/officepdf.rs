@@ -13,7 +13,11 @@ use crate::component_manager::run_with_timeout;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::Duration;
+
+/// 同一时间只允许一个导出任务（Office 应用实例与用户操作互不抢占）。
+static EXPORT_LOCK: Mutex<()> = Mutex::new(());
 
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(120);
 /// 缓存上限：文件数与总大小，超出时删除最旧的。
@@ -41,7 +45,15 @@ try {
       if (-not $pre) { $app.Visible = $false; $app.DisplayAlerts = $false }
       $app.AutomationSecurity = 3
       $wb = $app.Workbooks.Open($In, 0, $true)
-      try { $wb.ExportAsFixedFormat(0, $Out) } finally { $wb.Close($false) }
+      try {
+        # 只读工作簿：在内存中把每个工作表设为「按页宽缩放」（不保存，不改源文件），避免宽表格被切成很多碎页
+        try { $app.PrintCommunication = $false } catch {}
+        foreach ($ws in $wb.Worksheets) {
+          try { $ps = $ws.PageSetup; $ps.Zoom = $false; $ps.FitToPagesWide = 1; $ps.FitToPagesTall = $false } catch {}
+        }
+        try { $app.PrintCommunication = $true } catch {}
+        $wb.ExportAsFixedFormat(0, $Out)
+      } finally { $wb.Close($false) }
     }
     'powerpoint' {
       $app = New-Object -ComObject PowerPoint.Application
@@ -68,10 +80,18 @@ fn kind_of(format: &str) -> Option<(&'static str, &'static str)> {
 
 /// 本机是否安装了该格式对应的 Office 应用（只查注册表，不启动任何 Office 程序）。
 pub fn office_available(format: &str) -> bool {
+    if crate::component_manager::engines_disabled() {
+        return false;
+    }
     let Some((_, prog_id)) = kind_of(format) else { return false };
     let mut cmd = Command::new("reg");
     cmd.args(["query", &format!("HKCR\\{prog_id}\\CLSID"), "/ve"]);
     run_with_timeout(&mut cmd, Duration::from_secs(5)).is_ok()
+}
+
+/// 获取全局导出锁（PDF 与幻灯片导出共用，同一时间只有一个 Office 导出任务）。
+pub fn export_lock() -> std::sync::MutexGuard<'static, ()> {
+    EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 缓存键：路径 + 修改时间 + 大小；文件变化后自动失效。
@@ -80,6 +100,7 @@ pub fn cache_key(src: &Path) -> String {
         .map(|m| (crate::library::file_mtime(src), m.len()))
         .unwrap_or((0, 0));
     let mut h = Sha256::new();
+    h.update(b"v2"); // 导出方式变化（如 Excel 按页宽缩放）时递增，使旧缓存失效
     h.update(src.to_string_lossy().to_lowercase().as_bytes());
     h.update(mtime.to_le_bytes());
     h.update(size.to_le_bytes());
@@ -119,6 +140,14 @@ pub fn office_pdf_bytes(cache_dir: &Path, src: &Path, format: &str) -> Result<Ve
             if bytes.starts_with(b"%PDF") {
                 return Ok(bytes);
             }
+        }
+    }
+
+    // 串行化导出；排队期间同一文件可能已被其他任务导出完成，拿到锁后再查一次缓存
+    let _guard = export_lock();
+    if let Ok(bytes) = std::fs::read(&cached) {
+        if bytes.starts_with(b"%PDF") {
+            return Ok(bytes);
         }
     }
 
