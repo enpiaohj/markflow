@@ -47,6 +47,11 @@ export function libreofficeAvailable(): Promise<boolean> {
   return invoke("libreoffice_available");
 }
 
+/** 预热：选中 Word / PowerPoint 文件时后台提前生成版式预览缓存 */
+export function prewarmOfficePreview(libraryId: string, relativePath: string): Promise<void> {
+  return invoke("prewarm_office_preview", { libraryId, relativePath });
+}
+
 /** 记录最近打开（库内文档） */
 export function recordRecentOpen(libraryId: string, relativePath: string): Promise<void> {
   return invoke("record_recent_open", { libraryId, relativePath });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -14,6 +14,8 @@ import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
+import { officeKind } from "../lib/format";
+import { useExternalChange } from "../lib/useExternalChange";
 import type { OfficePreview } from "../lib/types";
 
 /**
@@ -32,6 +34,15 @@ export default function OfficePreviewPane() {
   const [engine, setEngine] = useState<"office" | "libreoffice" | "" | null>(null);
   const [hifiError, setHifiError] = useState("");
   const autoTriedRef = useRef(0);
+  const hifiTicketRef = useRef(0);
+  const aliveRef = useRef(true);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [precheck, setPrecheck] = useState<ConversionPrecheck | null>(null);
   const [converting, setConverting] = useState(false);
   const [hifiLoading, setHifiLoading] = useState(false);
@@ -70,17 +81,23 @@ export default function OfficePreviewPane() {
     return () => {
       cancelled = true;
     };
-  }, [current, viewerFile]);
+  }, [current, viewerFile, reloadNonce]);
 
   // 有可用引擎时默认直接显示版式预览（与 Word / Excel / PowerPoint 中一致）；
   // 用户主动选择「文本预览」后不再自动切换。注意：必须在下面的提前 return 之前调用 Hook。
   useEffect(() => {
     if (!viewerFile || viewerFile.kind !== "office" || viewerFile.preferText || !engine) return;
-    if (autoTriedRef.current === viewerFile.nonce) return;
-    autoTriedRef.current = viewerFile.nonce;
+    // Excel 默认使用原生表格网格（不转 PDF）；PowerPoint 使用逐页图片查看器；这里只对 Word 自动生成版式预览
+    if (officeKind(viewerFile.relativePath) !== "word") return;
+    const stamp = viewerFile.nonce * 1000 + reloadNonce;
+    if (autoTriedRef.current === stamp) return;
+    autoTriedRef.current = stamp;
     void openHifi(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, viewerFile]);
+  }, [engine, viewerFile, reloadNonce]);
+
+  // Word / Excel 等外部程序保存后回到 MarkFlow：重新解析并重新生成版式预览
+  useExternalChange(current?.id, rel, () => setReloadNonce((n) => n + 1), !!viewerFile);
 
   if (!current || !viewerFile) return null;
 
@@ -119,39 +136,27 @@ export default function OfficePreviewPane() {
 
   async function openHifi(auto = false) {
     if (!current) return;
+    const ticket = ++hifiTicketRef.current;
     setHifiLoading(true);
     setHifiError("");
     try {
       const bytes = await api.convertOfficeToPdf(current.id, rel);
+      // 用户已离开 / 取消 / 又发起了新的请求：丢弃结果，绝不在用户已关闭后再弹出查看器
+      if (!aliveRef.current || ticket !== hifiTicketRef.current) return;
       openInViewer(rel, "hifi", bytes);
     } catch (err) {
+      if (!aliveRef.current || ticket !== hifiTicketRef.current) return;
       // 自动模式失败时静默回退到文本快速预览，并在顶部说明原因；手动点击则弹窗
       if (auto) setHifiError(String(err));
       else await dialog.alert(String(err), "版式预览失败");
     } finally {
-      setHifiLoading(false);
+      if (aliveRef.current && ticket === hifiTicketRef.current) setHifiLoading(false);
     }
   }
 
-  // 自动生成版式预览期间显示进度（首次需启动 Office，约数秒；之后走缓存）
-  if (hifiLoading) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center bg-gray-50 text-gray-500">
-        <Loader2 className="h-7 w-7 animate-spin text-primary-500" />
-        <p className="mt-4 text-sm">正在生成版式预览…</p>
-        <p className="mt-1 max-w-sm text-center text-xs leading-relaxed text-gray-400">
-          使用{engine === "libreoffice" ? " LibreOffice" : " Microsoft Office"}
-          在后台只读打开并导出 PDF，不会修改原文件。首次需要几秒，之后会使用缓存。
-        </p>
-        <button
-          type="button"
-          onClick={closeViewer}
-          className="mt-5 h-8 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50"
-        >
-          取消并返回
-        </button>
-      </div>
-    );
+  function cancelHifi() {
+    hifiTicketRef.current++;
+    setHifiLoading(false);
   }
 
   return (
@@ -169,7 +174,7 @@ export default function OfficePreviewPane() {
         <span className="h-4 w-px bg-gray-200" />
         <FileSpreadsheet className="h-4 w-4 shrink-0 text-gray-400" />
         <span className="min-w-0 truncate text-[13px] font-medium text-gray-800">{rel}</span>
-        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">快速预览 · 提取文本</span>
+        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">文本快速预览</span>
         <div className="ml-auto flex items-center gap-2">
           {preview?.kind === "docx" && (
             <button
@@ -206,6 +211,19 @@ export default function OfficePreviewPane() {
           </button>
         </div>
       </div>
+
+      {hifiLoading && (
+        <div className="flex items-center gap-2.5 border-b border-primary-100 bg-primary-50/70 px-4 py-2 text-xs text-primary-700">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          <span className="flex-1">
+            正在用{engine === "libreoffice" ? " LibreOffice" : " Microsoft Office"}
+            生成精确版式（后台只读打开并导出，不会修改原文件；首次需要几秒，之后使用缓存）。生成完成后自动切换，下方先显示目录与文字内容。
+          </span>
+          <button type="button" onClick={cancelHifi} className="rounded border border-primary-200 bg-white px-2 py-0.5 text-primary-700 hover:bg-primary-50">
+            取消
+          </button>
+        </div>
+      )}
 
       {hifiError && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
@@ -300,18 +318,7 @@ export default function OfficePreviewPane() {
             </button>
           </div>
         ) : preview?.kind === "docx" ? (
-          <div className="px-6 py-6">
-            <div className="mx-auto min-h-[60%] w-full max-w-[820px] rounded-lg bg-white px-14 py-12 shadow-sm ring-1 ring-gray-200/60">
-              {preview.paragraphs.map((p, i) => (
-                <p key={i} className="text-[15px] leading-[1.9] text-gray-800">
-                  {i === 0 ? <span className="block pb-2 text-2xl font-bold">{p}</span> : p}
-                </p>
-              ))}
-            </div>
-            <p className="mt-4 text-center text-[11px] text-gray-400">
-              快速预览仅呈现提取文本；版式与图片请使用系统应用打开。
-            </p>
-          </div>
+          <DocxQuickView paragraphs={preview.paragraphs} headings={preview.headings} />
         ) : preview?.kind === "xlsx" ? (
           <div className="flex h-full min-h-0 flex-col px-6 py-5">
             {/* 工作表标签 */}
@@ -380,6 +387,65 @@ export default function OfficePreviewPane() {
             </p>
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Word 文本快速预览：左侧目录（标题样式提取）+ 正文提取文字，标题按级别加粗放大。 */
+function DocxQuickView({ paragraphs, headings }: { paragraphs: string[]; headings: { level: number; text: string }[] }) {
+  // 段落与标题按顺序对齐：文本相同的按出现顺序一一对应
+  const items = useMemo(() => {
+    let h = 0;
+    return paragraphs.map((text) => {
+      const trimmed = text.trim().slice(0, 120);
+      if (h < headings.length && headings[h].text === trimmed) {
+        return { text, level: headings[h++].level, anchor: h - 1 };
+      }
+      return { text, level: 0, anchor: -1 };
+    });
+  }, [paragraphs, headings]);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  const sizeClass = (level: number) =>
+    level === 1 ? "mt-5 text-2xl font-bold" : level === 2 ? "mt-4 text-xl font-bold" : level === 3 ? "mt-3 text-lg font-semibold" : "mt-2 text-base font-semibold";
+
+  return (
+    <div className="flex h-full min-h-0">
+      {headings.length > 0 && (
+        <nav className="hidden w-60 shrink-0 overflow-y-auto border-r border-gray-200 bg-white px-3 py-4 md:block">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">目录</p>
+          {headings.map((h, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => bodyRef.current?.querySelector(`[data-anchor="${i}"]`)?.scrollIntoView({ block: "start" })}
+              title={h.text}
+              className="block w-full truncate rounded px-2 py-1 text-left text-[12px] text-gray-600 hover:bg-gray-100 hover:text-primary-700"
+              style={{ paddingLeft: 8 + (Math.min(h.level, 5) - 1) * 12 }}
+            >
+              {h.text}
+            </button>
+          ))}
+        </nav>
+      )}
+      <div ref={bodyRef} className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto w-full max-w-[820px] rounded-lg bg-white px-14 py-12 shadow-sm ring-1 ring-gray-200/60">
+          {items.map((it, i) =>
+            it.level > 0 ? (
+              <p key={i} data-anchor={it.anchor} className={`${sizeClass(it.level)} text-gray-900`}>
+                {it.text}
+              </p>
+            ) : (
+              <p key={i} className="whitespace-pre-wrap text-[15px] leading-[1.9] text-gray-800">
+                {it.text}
+              </p>
+            ),
+          )}
+        </div>
+        <p className="mt-4 text-center text-[11px] text-gray-400">
+          文本快速预览仅呈现提取文字与目录；精确版式会在后台生成完成后自动显示，也可点右上「版式预览」。
+        </p>
       </div>
     </div>
   );

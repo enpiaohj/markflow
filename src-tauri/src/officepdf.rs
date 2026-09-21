@@ -13,7 +13,11 @@ use crate::component_manager::run_with_timeout;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::Duration;
+
+/// 同一时间只允许一个导出任务（Office 应用实例与用户操作互不抢占）。
+static EXPORT_LOCK: Mutex<()> = Mutex::new(());
 
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(120);
 /// 缓存上限：文件数与总大小，超出时删除最旧的。
@@ -119,6 +123,14 @@ pub fn office_pdf_bytes(cache_dir: &Path, src: &Path, format: &str) -> Result<Ve
             if bytes.starts_with(b"%PDF") {
                 return Ok(bytes);
             }
+        }
+    }
+
+    // 串行化导出；排队期间同一文件可能已被其他任务导出完成，拿到锁后再查一次缓存
+    let _guard = EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(bytes) = std::fs::read(&cached) {
+        if bytes.starts_with(b"%PDF") {
+            return Ok(bytes);
         }
     }
 

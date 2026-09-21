@@ -76,3 +76,12 @@ export function openRouteFor(format: string): OpenRoute {
   if (EDITABLE_FORMATS.has(format)) return "editor";
   return "system";
 }
+
+/** 由文件名判断 Office 应用类别 */
+export function officeKind(name: string): "word" | "excel" | "powerpoint" | null {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  if (["docx", "doc", "docm", "odt", "rtf"].includes(ext)) return "word";
+  if (["xlsx", "xls", "xlsm", "ods"].includes(ext)) return "excel";
+  if (["pptx", "ppt", "pptm", "odp"].includes(ext)) return "powerpoint";
+  return null;
+}

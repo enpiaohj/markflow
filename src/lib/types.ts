@@ -107,9 +107,14 @@ export interface VersionInfo {
 
 /** Office 快速预览（对应 Rust office.rs，按 kind 判别） */
 export type OfficePreview =
-  | { kind: "docx"; paragraphs: string[] }
+  | { kind: "docx"; paragraphs: string[]; headings: DocxHeading[] }
   | { kind: "xlsx"; sheets: SheetPreview[] }
   | { kind: "pptx"; slides: SlidePreview[] };
+
+export interface DocxHeading {
+  level: number;
+  text: string;
+}
 
 export interface SheetPreview {
   name: string;

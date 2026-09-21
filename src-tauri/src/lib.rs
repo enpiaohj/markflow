@@ -366,6 +366,33 @@ async fn office_hifi_engine(relative_path: String) -> String {
     .unwrap_or_default()
 }
 
+/// 预热：选中 Office 文件时在后台提前导出并缓存版式预览（失败静默，不影响后续正式打开）。
+#[tauri::command]
+async fn prewarm_office_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let path = library_file_path(&state, &library_id, &relative_path)?;
+    let format = crate::format::detect_format(relative_path.rsplit('/').next().unwrap_or(&relative_path)).to_string();
+    if !matches!(format.as_str(), "word" | "powerpoint") {
+        return Ok(());
+    }
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("无法定位缓存目录: {e}"))?
+        .join("office-preview");
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if officepdf::office_available(&format) {
+            let _ = officepdf::office_pdf_bytes(&cache_dir, &path, &format);
+        }
+    })
+    .await;
+    Ok(())
+}
+
 /// 版式预览：Office → PDF 字节。优先本机 Microsoft Office（后台无界面、只读、禁宏、带缓存），
 /// 失败或未安装时回退 LibreOffice；源文件绝不被修改。
 #[tauri::command]
@@ -1056,6 +1083,7 @@ pub fn run() {
             list_recent_files,
             libreoffice_available,
             office_hifi_engine,
+            prewarm_office_preview,
             record_recent_open,
             stat_file_mtime,
             list_libraries,
