@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { SettingGroup, SettingRow, Segmented, Toggle } from "../components/settings/ui";
 import { useDialog } from "../components/DialogContext";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import {
   getAutosave,
@@ -61,6 +62,27 @@ interface SimpleRow {
   description: string;
   keywords: string;
   node: ReactNode;
+}
+
+function AboutRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-4">
+      <dt className="w-20 shrink-0 text-gray-500">{label}</dt>
+      <dd className="min-w-0 break-all">{children}</dd>
+    </div>
+  );
+}
+
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={() => void openUrl(href).catch(() => {})}
+      className="text-primary-600 hover:underline"
+    >
+      {children}
+    </button>
+  );
 }
 
 /** 「设置」页：左侧分类 + 右侧内容；每项「名称 + 说明 | 控件」，改动立即生效；顶部搜索。 */
@@ -452,15 +474,36 @@ export default function SettingsView() {
     if (id === "about") {
       return (
         <>
-          <SettingGroup title="MARKFLOW">
-            <SettingRow label="版本" description="多格式本地文档库 · 本地优先 · 文件为真源">
-              <span className="text-sm tabular-nums text-gray-700">{version ? `v${version}` : "—"}</span>
-            </SettingRow>
-            <SettingRow
-              label="数据保存位置"
-              description="索引数据库与预览缓存保存在应用数据目录（%APPDATA%\com.markflow.app）；你的文档始终保存在原位置，MarkFlow 只保存索引与元数据。"
-            />
-          </SettingGroup>
+          <div className="mb-6 flex items-baseline gap-2.5">
+            <span className="text-xl font-semibold text-gray-900">MarkFlow</span>
+            <span className="text-xs text-gray-400">多格式本地文档库 · 本地优先 · 文件为真源</span>
+          </div>
+          <dl className="space-y-3 text-sm">
+            <AboutRow label="版本">
+              <span className="tabular-nums text-gray-800">{version ? `v${version}` : "—"}</span>
+            </AboutRow>
+            <AboutRow label="开发者">
+              <span className="text-gray-800">enpiaohj</span>
+              <ExternalLink href="https://github.com/enpiaohj">（GitHub）</ExternalLink>
+            </AboutRow>
+            <AboutRow label="源码仓库">
+              <ExternalLink href="https://github.com/enpiaohj/markflow">https://github.com/enpiaohj/markflow</ExternalLink>
+            </AboutRow>
+            <AboutRow label="许可证">
+              <span className="text-gray-800">私有项目 · 保留所有权利（暂未开源）</span>
+            </AboutRow>
+          </dl>
+          <p className="mt-3 text-xs leading-relaxed text-gray-400">
+            Word / PowerPoint 内置渲染使用 Apache-2.0 许可的第三方组件（docx-preview、pptx-renderer），PDF 阅读使用 PDF.js。
+          </p>
+          <div className="my-6 h-px bg-gray-200" />
+          <h3 className="text-sm font-semibold text-gray-900">隐私与数据</h3>
+          <p className="mt-2 text-xs leading-relaxed text-gray-500">
+            MarkFlow 不收集遥测、崩溃报告或使用统计，不会向开发者或任何第三方发送使用数据。你的文档始终保存在原位置；
+            索引数据库与预览缓存保存在本机应用数据目录（%APPDATA%\com.markflow.app）。唯一的对外请求来自 AI 功能：
+            只有当你在「AI」中配置了 Provider 并主动使用时，才会把你选择的上下文发送到你配置的服务地址。
+          </p>
+          <div className="mt-8" />
           <SettingGroup title="快捷键">
             {SHORTCUTS.map(([keys, desc]) => (
               <div key={keys} className="flex items-center gap-4 px-4 py-2.5 text-sm">
