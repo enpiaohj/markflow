@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -29,7 +29,9 @@ export default function OfficePreviewPane() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeSheet, setActiveSheet] = useState(0);
-  const [hasLibreOffice, setHasLibreOffice] = useState(false);
+  const [engine, setEngine] = useState<"office" | "libreoffice" | "" | null>(null);
+  const [hifiError, setHifiError] = useState("");
+  const autoTriedRef = useRef(0);
   const [precheck, setPrecheck] = useState<ConversionPrecheck | null>(null);
   const [converting, setConverting] = useState(false);
   const [hifiLoading, setHifiLoading] = useState(false);
@@ -37,10 +39,15 @@ export default function OfficePreviewPane() {
   const rel = viewerFile?.relativePath ?? "";
 
   useEffect(() => {
-    void api.libreofficeAvailable().then(setHasLibreOffice).catch(() => setHasLibreOffice(false));
+    if (!viewerFile) return;
+    setEngine(null);
+    void api
+      .officeHifiEngine(viewerFile.relativePath)
+      .then(setEngine)
+      .catch(() => setEngine(""));
     configureZoom({ visible: true, min: 0.5, max: 2.5, step: 0.1, value: 1 });
     return () => configureZoom({ visible: false });
-  }, [configureZoom]);
+  }, [configureZoom, viewerFile?.relativePath]);
 
   useEffect(() => {
     if (!current || !viewerFile || viewerFile.kind !== "office") return;
@@ -64,6 +71,16 @@ export default function OfficePreviewPane() {
       cancelled = true;
     };
   }, [current, viewerFile]);
+
+  // 有可用引擎时默认直接显示版式预览（与 Word / Excel / PowerPoint 中一致）；
+  // 用户主动选择「文本预览」后不再自动切换。注意：必须在下面的提前 return 之前调用 Hook。
+  useEffect(() => {
+    if (!viewerFile || viewerFile.kind !== "office" || viewerFile.preferText || !engine) return;
+    if (autoTriedRef.current === viewerFile.nonce) return;
+    autoTriedRef.current = viewerFile.nonce;
+    void openHifi(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, viewerFile]);
 
   if (!current || !viewerFile) return null;
 
@@ -100,17 +117,41 @@ export default function OfficePreviewPane() {
     }
   }
 
-  async function openHifi() {
+  async function openHifi(auto = false) {
     if (!current) return;
     setHifiLoading(true);
+    setHifiError("");
     try {
       const bytes = await api.convertOfficeToPdf(current.id, rel);
       openInViewer(rel, "hifi", bytes);
     } catch (err) {
-      await dialog.alert(String(err), "高保真预览失败");
+      // 自动模式失败时静默回退到文本快速预览，并在顶部说明原因；手动点击则弹窗
+      if (auto) setHifiError(String(err));
+      else await dialog.alert(String(err), "版式预览失败");
     } finally {
       setHifiLoading(false);
     }
+  }
+
+  // 自动生成版式预览期间显示进度（首次需启动 Office，约数秒；之后走缓存）
+  if (hifiLoading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center bg-gray-50 text-gray-500">
+        <Loader2 className="h-7 w-7 animate-spin text-primary-500" />
+        <p className="mt-4 text-sm">正在生成版式预览…</p>
+        <p className="mt-1 max-w-sm text-center text-xs leading-relaxed text-gray-400">
+          使用{engine === "libreoffice" ? " LibreOffice" : " Microsoft Office"}
+          在后台只读打开并导出 PDF，不会修改原文件。首次需要几秒，之后会使用缓存。
+        </p>
+        <button
+          type="button"
+          onClick={closeViewer}
+          className="mt-5 h-8 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50"
+        >
+          取消并返回
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -142,16 +183,16 @@ export default function OfficePreviewPane() {
               转换为可编辑文档
             </button>
           )}
-          {hasLibreOffice && (
+          {engine && (
             <button
               type="button"
               onClick={() => void openHifi()}
               disabled={hifiLoading}
-              title="使用 LibreOffice 渲染为 PDF 查看版式（不修改源文件）"
+              title={`使用${engine === "office" ? " Microsoft Office" : " LibreOffice"} 渲染为 PDF 查看原始版式（只读，不修改源文件）`}
               className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
               {hifiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              高保真预览
+              版式预览
             </button>
           )}
           <button
@@ -165,6 +206,13 @@ export default function OfficePreviewPane() {
           </button>
         </div>
       </div>
+
+      {hifiError && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          <span className="font-medium">版式预览失败，已回退到文本快速预览：</span>
+          <span className="break-all">{hifiError}</span>
+        </div>
+      )}
 
       {/* 转换预检对话框（设计文档 §5.3：预检 → 知情确认 → 副本） */}
       {precheck && (

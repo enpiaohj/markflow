@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Office 文档（DOCX / XLSX / PPTX 及 DOC / XLS / PPT / ODT / RTF）默认显示**版式预览**：
+  本机装有 Microsoft Office 时，后台只读、禁用宏、无界面地导出 PDF 再显示，
+  版式与 Office 中一致（此前只有装了 LibreOffice 才有，且仅显示提取文字，格式全部丢失）；
+  结果按「路径 + 修改时间 + 大小」缓存（上限 60 个 / 400 MB），文件变化后自动失效。
+  回退顺序：Microsoft Office → LibreOffice → 文本快速预览；失败时顶部说明原因。
+- 版式预览可随时切换到「文本预览 / 转换」；「版式预览」按钮不再依赖 LibreOffice。
+- Office → PDF 转换改为异步执行，不再阻塞界面。
+
 ## [0.4.1] - 2026-09-21
 
 ### Added

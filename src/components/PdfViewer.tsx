@@ -24,7 +24,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  * 批注与 OCR 按 §8.8 / §8.10 路线后续交付。
  */
 export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffer; title: string } }) {
-  const { current, viewerFile, closeViewer } = useLibrary();
+  const { current, viewerFile, closeViewer, openInViewer } = useLibrary();
   const { config: zoomConfig, zoomIn, zoomOut, configure: configureZoom } = useZoom();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const docRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
@@ -240,6 +240,16 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
           >
             {searching ? "搜索中…" : "搜索"}
           </button>
+          {external && (
+            <button
+              type="button"
+              onClick={() => openInViewer(rel, "office", undefined, { preferText: true })}
+              title="切换到文本快速预览（提取文字，可转换为可编辑文档）"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              文本预览 / 转换
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {

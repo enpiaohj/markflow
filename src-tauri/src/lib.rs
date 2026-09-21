@@ -10,6 +10,7 @@ mod fsops;
 mod library;
 mod ocr;
 mod office;
+mod officepdf;
 mod openfile;
 mod selfwrite;
 mod sensitive;
@@ -348,18 +349,60 @@ fn convert_docx_to_markdown(
     Ok(out)
 }
 
-/// LibreOffice 高保真预览：Office → PDF 字节（临时目录隔离，用后即清）。
+/// 可用的版式预览引擎：`office`（本机 Microsoft Office）> `libreoffice` > 空串（仅文本快速预览）。
 #[tauri::command]
-fn convert_office_to_pdf(
+async fn office_hifi_engine(relative_path: String) -> String {
+    tauri::async_runtime::spawn_blocking(move || {
+        let format = crate::format::detect_format(relative_path.rsplit('/').next().unwrap_or(&relative_path));
+        if officepdf::office_available(format) {
+            "office".to_string()
+        } else if component_manager::detect_soffice().is_some() {
+            "libreoffice".to_string()
+        } else {
+            String::new()
+        }
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// 版式预览：Office → PDF 字节。优先本机 Microsoft Office（后台无界面、只读、禁宏、带缓存），
+/// 失败或未安装时回退 LibreOffice；源文件绝不被修改。
+#[tauri::command]
+async fn convert_office_to_pdf(
+    app: AppHandle,
     state: State<'_, AppState>,
     library_id: String,
     relative_path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let Some(soffice) = component_manager::detect_soffice() else {
-        return Err("未检测到 LibreOffice 组件。安装 LibreOffice 后即可使用高保真预览（当前为提取文本快速预览）。".into());
-    };
     let path = library_file_path(&state, &library_id, &relative_path)?;
-    let bytes = convert::office_to_pdf_bytes(&soffice, &path)?;
+    let format = crate::format::detect_format(relative_path.rsplit('/').next().unwrap_or(&relative_path)).to_string();
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("无法定位缓存目录: {e}"))?
+        .join("office-preview");
+    let bytes = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let mut office_err: Option<String> = None;
+        if officepdf::office_available(&format) {
+            match officepdf::office_pdf_bytes(&cache_dir, &path, &format) {
+                Ok(b) => return Ok(b),
+                Err(e) => office_err = Some(e),
+            }
+        }
+        if let Some(soffice) = component_manager::detect_soffice() {
+            return convert::office_to_pdf_bytes(&soffice, &path)
+                .map_err(|e| match office_err {
+                    Some(oe) => format!("{oe}\n回退 LibreOffice 也失败：{e}"),
+                    None => e,
+                });
+        }
+        Err(office_err.unwrap_or_else(|| {
+            "未检测到 Microsoft Office 或 LibreOffice，无法生成版式预览（当前为提取文本快速预览）。".into()
+        }))
+    })
+    .await
+    .map_err(|e| format!("预览任务失败: {e}"))??;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1012,6 +1055,7 @@ pub fn run() {
             take_pending_open_paths,
             list_recent_files,
             libreoffice_available,
+            office_hifi_engine,
             record_recent_open,
             stat_file_mtime,
             list_libraries,

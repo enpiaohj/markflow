@@ -63,8 +63,10 @@ interface LibraryContextValue {
     relativePath: string;
     kind: "pdf" | "office" | "hifi" | "image";
     nonce: number;
-    /** hifi 模式：LibreOffice 转出的 PDF 字节 */
+    /** hifi 模式：Office / LibreOffice 转出的 PDF 字节 */
     bytes?: ArrayBuffer;
+    /** 用户主动选择文本快速预览：不再自动切到版式预览 */
+    preferText?: boolean;
   } | null;
   openWizard: () => void;
   closeWizard: () => void;
@@ -87,7 +89,12 @@ interface LibraryContextValue {
   /** 关闭编辑器，返回文档库视图 */
   closeFile: () => void;
   /** 在只读查看器中打开文件 */
-  openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => void;
+  openInViewer: (
+    relativePath: string,
+    kind: "pdf" | "office" | "hifi" | "image",
+    bytes?: ArrayBuffer,
+    opts?: { preferText?: boolean },
+  ) => void;
   /** 关闭查看器 */
   closeViewer: () => void;
   openDelivery: () => void;
@@ -115,6 +122,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     kind: "pdf" | "office" | "hifi" | "image";
     nonce: number;
     bytes?: ArrayBuffer;
+    preferText?: boolean;
   } | null>(null);
 
   const dialog = useDialog();
@@ -307,14 +315,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   );
 
   const openInViewerGuarded = useCallback(
-    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
+    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean }) => {
       void confirmDiscard().then((ok) => {
         if (!ok) return;
         if (kind !== "hifi" && currentIdRef.current) void api.recordRecentOpen(currentIdRef.current, relativePath).catch(() => {});
         setOpenFile(null);
         setDeliveryOpen(false);
         setFocusFile(null);
-        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
+        setViewerFile({ relativePath, kind, nonce: Date.now(), bytes, preferText: opts?.preferText });
       });
     },
     [confirmDiscard],

@@ -37,6 +37,11 @@ export function takePendingOpenPaths(): Promise<string[]> {
   return invoke("take_pending_open_paths");
 }
 
+/** 版式预览引擎：office（本机 Microsoft Office）/ libreoffice / 空串（仅文本预览） */
+export function officeHifiEngine(relativePath: string): Promise<"office" | "libreoffice" | ""> {
+  return invoke("office_hifi_engine", { relativePath });
+}
+
 /** LibreOffice 是否可用（轻量探测） */
 export function libreofficeAvailable(): Promise<boolean> {
   return invoke("libreoffice_available");
