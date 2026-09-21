@@ -230,7 +230,7 @@ function SourceEditor({
 // ---------------------------------------------------------------------------
 
 export default function EditorPane() {
-  const { current, openFile, closeFile } = useLibrary();
+  const { current, openFile, closeFile, setEditorDirty } = useLibrary();
   const { configure: configureZoom } = useZoom();
   const [entry, setEntry] = useState<FileEntry | null>(null);
   const [savedText, setSavedText] = useState("");
@@ -445,6 +445,12 @@ export default function EditorPane() {
 
   const isMarkdown = entry?.format === "markdown";
   const dirty = editText !== savedText;
+
+  // 向全局上报未保存状态（活动栏切换时用于离开确认）
+  useEffect(() => {
+    setEditorDirty(dirty);
+    return () => setEditorDirty(false);
+  }, [dirty, setEditorDirty]);
   // 展示状态：保存中/失败优先，其后由「文本是否变化」驱动
   const displayState: SaveState =
     saveState === "saving" ? "saving" : saveState === "error" ? "error" : dirty ? "dirty" : "saved";
