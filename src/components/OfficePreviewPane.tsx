@@ -16,6 +16,7 @@ import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 import { officeKind } from "../lib/format";
 import { useExternalChange } from "../lib/useExternalChange";
+import PptxViewer from "./office/PptxViewer";
 import XlsxGrid from "./office/XlsxGrid";
 import type { OfficePreview } from "../lib/types";
 
@@ -34,6 +35,7 @@ export default function OfficePreviewPane() {
   const [activeSheet, setActiveSheet] = useState(0);
   const [engine, setEngine] = useState<"office" | "libreoffice" | "" | null>(null);
   const [hifiError, setHifiError] = useState("");
+  const [pptxText, setPptxText] = useState(false);
   const autoTriedRef = useRef(0);
   const hifiTicketRef = useRef(0);
   const aliveRef = useRef(true);
@@ -95,8 +97,10 @@ export default function OfficePreviewPane() {
   // 用户主动选择「文本预览」后不再自动切换。注意：必须在下面的提前 return 之前调用 Hook。
   useEffect(() => {
     if (!viewerFile || viewerFile.kind !== "office" || viewerFile.preferText || !engine) return;
-    // Excel 默认使用原生表格网格（不转 PDF）；PowerPoint 使用逐页图片查看器；这里只对 Word 自动生成版式预览
-    if (officeKind(viewerFile.relativePath) !== "word") return;
+    // Excel 默认使用原生表格网格（不转 PDF）；有 Office 的 PowerPoint 使用逐页图片查看器；
+    // 这里对 Word 自动生成版式预览，只有 LibreOffice 时对 PowerPoint 也走 PDF
+    const kind = officeKind(viewerFile.relativePath);
+    if (kind !== "word" && !(kind === "powerpoint" && engine === "libreoffice")) return;
     const stamp = viewerFile.nonce * 1000 + reloadNonce;
     if (autoTriedRef.current === stamp) return;
     autoTriedRef.current = stamp;
@@ -198,7 +202,17 @@ export default function OfficePreviewPane() {
               转换为可编辑文档
             </button>
           )}
-          {engine && (
+          {officeKind(rel) === "powerpoint" && engine === "office" && (
+            <button
+              type="button"
+              onClick={() => setPptxText((v) => !v)}
+              title="在幻灯片图片与文本大纲之间切换"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              {pptxText ? "幻灯片" : "文本大纲"}
+            </button>
+          )}
+          {engine && !(officeKind(rel) === "powerpoint" && engine === "office") && (
             <button
               type="button"
               onClick={() => void openHifi()}
@@ -308,9 +322,24 @@ export default function OfficePreviewPane() {
       )}
 
       {/* 内容 */}
-      <div className="min-h-0 flex-1 overflow-auto" style={{ zoom: zoomConfig.value }}>
+      <div
+        className="min-h-0 flex-1 overflow-auto"
+        style={officeKind(rel) === "powerpoint" && engine === "office" && !pptxText ? undefined : { zoom: zoomConfig.value }}
+      >
         {officeKind(rel) === "excel" ? (
           <XlsxGrid libraryId={current.id} relativePath={rel} reloadKey={reloadNonce} />
+        ) : officeKind(rel) === "powerpoint" && engine === "office" && !viewerFile.preferText && !pptxText ? (
+          <PptxViewer
+            libraryId={current.id}
+            relativePath={rel}
+            reloadKey={reloadNonce}
+            titles={preview?.kind === "pptx" ? preview.slides.map((s) => s.title) : []}
+            zoom={zoomConfig.value}
+            onFail={(msg) => {
+              setHifiError(msg);
+              setPptxText(true);
+            }}
+          />
         ) : loading ? (
           <div className="flex h-full flex-col items-center justify-center text-gray-400">
             <Loader2 className="h-6 w-6 animate-spin" />

@@ -18,6 +18,7 @@ import type {
   AiChatOutcome,
   OpenTarget,
   XlsxView,
+  SlidesMeta,
   RecentFile,
   LibraryMeta,
   QuickScanResult,
@@ -46,6 +47,15 @@ export function officeHifiEngine(relativePath: string): Promise<"office" | "libr
 /** LibreOffice 是否可用（轻量探测） */
 export function libreofficeAvailable(): Promise<boolean> {
   return invoke("libreoffice_available");
+}
+
+/** PowerPoint 逐页图片导出（进度通过 pptx:progress 事件推送） */
+export function pptxExportSlides(requestId: string, libraryId: string, relativePath: string): Promise<SlidesMeta> {
+  return invoke("pptx_export_slides", { requestId, libraryId, relativePath });
+}
+
+export function readPreviewSlide(key: string, index: number): Promise<ArrayBuffer> {
+  return invoke("read_preview_slide", { key, index });
 }
 
 /** XLSX 原生表格视图（样式 / 列宽 / 合并 / 冻结窗格 / 数字格式） */

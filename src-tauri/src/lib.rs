@@ -12,6 +12,7 @@ mod ocr;
 mod office;
 mod officepdf;
 mod openfile;
+mod pptxslides;
 mod selfwrite;
 mod sensitive;
 mod tasks;
@@ -380,6 +381,42 @@ async fn get_xlsx_view(
         .map_err(|e| format!("解析任务失败: {e}"))?
 }
 
+/// PowerPoint 逐页图片：后台导出，每张可用时通过 `pptx:progress` 事件通知；返回最终元数据。
+#[tauri::command]
+async fn pptx_export_slides(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request_id: String,
+    library_id: String,
+    relative_path: String,
+) -> Result<pptxslides::SlidesMeta, String> {
+    let path = library_file_path(&state, &library_id, &relative_path)?;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("无法定位缓存目录: {e}"))?
+        .join("office-preview");
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        pptxslides::export_slides(&cache_dir, &path, &|p| {
+            let _ = app2.emit("pptx:progress", serde_json::json!({ "requestId": request_id, "progress": p }));
+        })
+    })
+    .await
+    .map_err(|e| format!("导出任务失败: {e}"))?
+}
+
+/// 读取某张幻灯片的 PNG 字节（仅限预览缓存目录）。
+#[tauri::command]
+fn read_preview_slide(app: AppHandle, key: String, index: usize) -> Result<tauri::ipc::Response, String> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("无法定位缓存目录: {e}"))?
+        .join("office-preview");
+    Ok(tauri::ipc::Response::new(pptxslides::read_slide(&cache_dir, &key, index)?))
+}
+
 /// 预热：选中 Office 文件时在后台提前导出并缓存版式预览（失败静默，不影响后续正式打开）。
 #[tauri::command]
 async fn prewarm_office_preview(
@@ -400,7 +437,12 @@ async fn prewarm_office_preview(
         .join("office-preview");
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if officepdf::office_available(&format) {
-            let _ = officepdf::office_pdf_bytes(&cache_dir, &path, &format);
+            if format == "powerpoint" {
+                // PowerPoint 预览是逐页图片，预热的也是图片缓存
+                let _ = pptxslides::export_slides(&cache_dir, &path, &|_| {});
+            } else {
+                let _ = officepdf::office_pdf_bytes(&cache_dir, &path, &format);
+            }
         }
     })
     .await;
@@ -1099,6 +1141,8 @@ pub fn run() {
             office_hifi_engine,
             prewarm_office_preview,
             get_xlsx_view,
+            pptx_export_slides,
+            read_preview_slide,
             record_recent_open,
             stat_file_mtime,
             list_libraries,

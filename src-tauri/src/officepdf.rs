@@ -86,6 +86,11 @@ pub fn office_available(format: &str) -> bool {
     run_with_timeout(&mut cmd, Duration::from_secs(5)).is_ok()
 }
 
+/// 获取全局导出锁（PDF 与幻灯片导出共用，同一时间只有一个 Office 导出任务）。
+pub fn export_lock() -> std::sync::MutexGuard<'static, ()> {
+    EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 缓存键：路径 + 修改时间 + 大小；文件变化后自动失效。
 pub fn cache_key(src: &Path) -> String {
     let (mtime, size) = std::fs::metadata(src)
@@ -136,7 +141,7 @@ pub fn office_pdf_bytes(cache_dir: &Path, src: &Path, format: &str) -> Result<Ve
     }
 
     // 串行化导出；排队期间同一文件可能已被其他任务导出完成，拿到锁后再查一次缓存
-    let _guard = EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = export_lock();
     if let Ok(bytes) = std::fs::read(&cached) {
         if bytes.starts_with(b"%PDF") {
             return Ok(bytes);

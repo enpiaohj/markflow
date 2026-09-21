@@ -111,6 +111,18 @@ export type OfficePreview =
   | { kind: "xlsx"; sheets: SheetPreview[] }
   | { kind: "pptx"; slides: SlidePreview[] };
 
+/** PowerPoint 逐页图片导出 */
+export interface SlidesMeta {
+  key: string;
+  count: number;
+  width: number;
+  height: number;
+}
+
+export interface SlidesProgress extends SlidesMeta {
+  ready: number;
+}
+
 /** XLSX 原生表格视图 */
 export interface XlsxView {
   sheets: XSheet[];
