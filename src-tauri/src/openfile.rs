@@ -170,7 +170,7 @@ fn find_or_create_adhoc(conn: &Connection, parent: &str, file_name: &str) -> Res
 }
 
 /// 确保该文件在库索引中有记录（新建 / 刚被外部程序写入、尚未被监听重扫收录的文件）。
-fn ensure_indexed(conn: &Connection, meta: &LibraryMeta, rel: &str) -> Result<(), String> {
+pub fn ensure_indexed(conn: &Connection, meta: &LibraryMeta, rel: &str) -> Result<(), String> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0)",
@@ -266,6 +266,32 @@ mod tests {
         assert_eq!(target.library_id, lib.id);
         assert_eq!(target.relative_path, "a/x.md");
         assert!(!target.adhoc);
+    }
+
+    #[test]
+    fn converted_copy_is_readable_right_after_ensure_indexed() {
+        // 回归：Word 转 Markdown 后立刻打开副本，副本尚未被后台重扫收录 → 曾报「文件不存在于文档库索引」
+        let conn = db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        let lib = create_library(
+            &conn,
+            CreateLibraryRequest {
+                root_path: dir.path().to_string_lossy().to_string(),
+                name: Some("转换测试".into()),
+                exclude_dirs: vec![],
+                full_text_index: true,
+                ocr_enabled: false,
+                portable_meta: false,
+            },
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("docs").join("样例.md"), "# 样例
+正文").unwrap();
+        assert!(crate::editor::read_text_file(&conn, &lib.id, "docs/样例.md").is_err());
+        ensure_indexed(&conn, &lib, "docs/样例.md").unwrap();
+        let file = crate::editor::read_text_file(&conn, &lib.id, "docs/样例.md").unwrap();
+        assert!(file.content.contains("样例"));
     }
 
     #[test]

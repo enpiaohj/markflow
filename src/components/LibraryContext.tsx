@@ -135,6 +135,15 @@ interface LibraryContextValue {
   closeCurrentLibrary: () => void;
   /** 聚焦到文档库中的某个文件（父目录 + 选中详情） */
   requestFocusFile: (relativePath: string, libraryId?: string) => void;
+  /** 在指定文档库中打开（标签作用域内自动绑定为标签所属的库） */
+  openInEditorIn: (lib: LibraryMeta, relativePath: string) => void;
+  openInViewerIn: (
+    lib: LibraryMeta,
+    relativePath: string,
+    kind: "pdf" | "office" | "hifi" | "image",
+    bytes?: ArrayBuffer,
+    opts?: { preferText?: boolean; forceBuiltin?: boolean },
+  ) => void;
   /** 在编辑器中打开文本文件 */
   openInEditor: (relativePath: string) => void;
   /** 关闭编辑器，返回文档库视图 */
@@ -565,10 +574,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     if (id) await closeTab(id);
   }, [closeTab]);
 
-  const openInEditorGuarded = useCallback(
-    (relativePath: string) => {
-      const lib = currentRef.current;
-      if (!lib) return;
+  /** 在指定文档库中打开（标签内的操作必须用标签所属的库，而不是当前活动库） */
+  const openInEditorIn = useCallback(
+    (lib: LibraryMeta, relativePath: string) => {
       void api.recordRecentOpen(lib.id, relativePath).catch(() => {});
       setFocusFile(null);
       upsertTab(lib, relativePath, "editor");
@@ -576,15 +584,29 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     [upsertTab],
   );
 
-  const openInViewerGuarded = useCallback(
-    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) => {
-      const lib = currentRef.current;
-      if (!lib) return;
+  const openInViewerIn = useCallback(
+    (lib: LibraryMeta, relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) => {
       if (kind !== "hifi") void api.recordRecentOpen(lib.id, relativePath).catch(() => {});
       setFocusFile(null);
       upsertTab(lib, relativePath, kind, { bytes, preferText: opts?.preferText, forceBuiltin: opts?.forceBuiltin });
     },
     [upsertTab],
+  );
+
+  const openInEditorGuarded = useCallback(
+    (relativePath: string) => {
+      const lib = currentRef.current;
+      if (lib) openInEditorIn(lib, relativePath);
+    },
+    [openInEditorIn],
+  );
+
+  const openInViewerGuarded = useCallback(
+    (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) => {
+      const lib = currentRef.current;
+      if (lib) openInViewerIn(lib, relativePath, kind, bytes, opts);
+    },
+    [openInViewerIn],
   );
 
   const openPath = useCallback(
@@ -695,6 +717,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         else setOpenIds([]);
       },
       requestFocusFile,
+      openInEditorIn,
+      openInViewerIn,
       openInEditor: openInEditorGuarded,
       closeFile: () => setActiveTabId(null),
       openInViewer: openInViewerGuarded,
@@ -706,7 +730,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       closeDelivery: () => setActiveTabId(null),
     }),
-    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, managerOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, tabs, activeTabId, activeTab, dirtyTabs, closeTab, closeTabsForPath, upsertTab, requestSearchView, requestView, requestTasksView, switchToLibrary, activateLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
+    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, managerOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, tabs, activeTabId, activeTab, dirtyTabs, closeTab, closeTabsForPath, upsertTab, requestSearchView, requestView, requestTasksView, switchToLibrary, activateLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded, openInEditorIn, openInViewerIn],
   );
 
   return (
@@ -761,6 +785,10 @@ export function useLibrary(): LibraryContextValue {
       closeDelivery: showMain,
       closeDocument: () => closeTab(tab.id),
       activateTab,
+      // 标签里发起的「打开」始终针对标签所属的库（转换出的副本、版式预览切换等），与当前活动库无关
+      openInEditor: (rel: string) => ctx.openInEditorIn(tab.lib, rel),
+      openInViewer: (rel: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer, opts?: { preferText?: boolean; forceBuiltin?: boolean }) =>
+        ctx.openInViewerIn(tab.lib, rel, kind, bytes, opts),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, tab, view, active, dirtyTabs, setDirty, closeTab, showMain, activateTab]);

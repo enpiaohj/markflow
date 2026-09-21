@@ -373,8 +373,16 @@ fn convert_docx_to_markdown(
 
     let out = result?;
 
-    // 副本入库：全量重扫（复用任务中心的扫描任务与事件）
+    // 副本先同步登记进索引：前端转换完成后立刻打开它，此时后台全量重扫多半还没跑完，
+    // 不登记会得到「文件不存在于文档库索引」而打不开
     let meta = library::get_library(&state.0.lock().unwrap(), &library_id)?;
+    let md_rel = match relative_path.rsplit_once('/') {
+        Some((parent, _)) => format!("{parent}/{}", out.md_relative_path),
+        None => out.md_relative_path.clone(),
+    };
+    openfile::ensure_indexed(&state.0.lock().unwrap(), &meta, &md_rel)?;
+
+    // 副本入库：全量重扫（复用任务中心的扫描任务与事件；附件等其余文件由它收录）
     library::spawn_full_scan(
         app,
         state.inner().clone(),
