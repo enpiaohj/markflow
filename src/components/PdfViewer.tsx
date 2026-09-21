@@ -13,6 +13,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
+import { useZoom } from "./ZoomContext";
 import * as api from "../lib/api";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -24,6 +25,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  */
 export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffer; title: string } }) {
   const { current, viewerFile, closeViewer } = useLibrary();
+  const { config: zoomConfig, zoomIn, zoomOut, configure: configureZoom } = useZoom();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const docRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
   const loadingTaskRef = useRef<pdfjsLib.PDFDocumentLoadingTask | null>(null);
@@ -31,7 +33,6 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
 
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(1.2);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -71,6 +72,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
     setError("");
     setHitPages(null);
     setKeyword("");
+    configureZoom({ visible: true, min: 0.4, max: 4, step: 0.2, value: 1.2 });
     api
       .readFileBytes(current.id, viewerFile.relativePath)
       .then(async (bytes: ArrayBuffer) => {
@@ -99,6 +101,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
       void loadingTaskRef.current?.destroy();
       docRef.current = null;
       loadingTaskRef.current = null;
+      configureZoom({ visible: false });
     };
   }, [current, viewerFile]);
 
@@ -111,7 +114,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
       const pg = await doc.getPage(Math.min(Math.max(page, 1), numPages));
       if (cancelled) return;
       const dpr = window.devicePixelRatio || 1;
-      const viewport = pg.getViewport({ scale: zoom * dpr });
+      const viewport = pg.getViewport({ scale: zoomConfig.value * dpr });
       const canvas = canvasRef.current;
       if (!canvas) return;
       const context = canvas.getContext("2d");
@@ -132,7 +135,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
     return () => {
       cancelled = true;
     };
-  }, [page, zoom, loading, numPages]);
+  }, [page, zoomConfig.value, loading, numPages]);
 
   const runSearch = useCallback(async () => {
     const doc = docRef.current;
@@ -207,11 +210,11 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
 
         {/* 缩放 */}
         <div className="flex items-center gap-1 rounded-lg border border-gray-200 px-1 py-0.5">
-          <button type="button" onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))} className="rounded p-0.5 text-gray-500 hover:bg-gray-100">
+          <button type="button" onClick={zoomOut} disabled={zoomConfig.value <= zoomConfig.min} className="rounded p-0.5 text-gray-500 hover:bg-gray-100 disabled:opacity-30">
             <ZoomOut className="h-4 w-4" />
           </button>
-          <span className="px-1 text-xs text-gray-600">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={() => setZoom((z) => Math.min(4, z + 0.2))} className="rounded p-0.5 text-gray-500 hover:bg-gray-100">
+          <span className="px-1 text-xs text-gray-600">{Math.round(zoomConfig.value * 100)}%</span>
+          <button type="button" onClick={zoomIn} disabled={zoomConfig.value >= zoomConfig.max} className="rounded p-0.5 text-gray-500 hover:bg-gray-100 disabled:opacity-30">
             <ZoomIn className="h-4 w-4" />
           </button>
         </div>
