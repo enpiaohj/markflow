@@ -21,7 +21,7 @@
 
 ## 项目概述
 
-MarkFlow 是多格式本地文档库桌面应用（详见本地 `docs/01-产品设计/`，该目录不入库）。
+MarkFlow 是多格式本地文档库桌面应用（设计文档不入库，见 ai-coding-workspace 的 MarkFlow 项目目录）。
 核心原则：本地优先、文件为真源、能力分级透明、AI 不越权、操作可恢复、结果可验证。
 **不重造 Office 编辑器；所有原文件保持原格式与原路径；SQLite 只存索引与元数据，不作为正文唯一副本。**
 
@@ -57,7 +57,7 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 
 ## 文档索引
 
-- 产品设计：`docs/01-产品设计/`
+- 产品设计：不入库，统一存放于 ai-coding-workspace 的 MarkFlow 项目目录
 - 使用指南：`docs/2026-09-21-MarkFlow使用指南-v1.1.md`
 - 开发指南（环境 / 模块职责 / 测试 / 发布流程）：`docs/2026-09-21-MarkFlow开发指南-v1.1.md`
 - 变更记录：`CHANGELOG.md`
