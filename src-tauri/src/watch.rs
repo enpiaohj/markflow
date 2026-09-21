@@ -1,9 +1,10 @@
 //! 文件监听（设计文档 §5.4 外部应用编辑闭环、§8.4 索引与内容提取）：
 //! 外部程序修改文档库后自动重新索引。
-//! 策略：notify 递归监听当前库 → 事件去抖（1.2 秒静默）→ 全量重扫 → `library:changed` 事件。
+//! 策略：notify 递归监听工作区中所有已打开的库（每库一个 watcher） → 事件去抖（1.2 秒静默）→ 全量重扫 → `library:changed` 事件。
 //! 文件被 Excel 等程序占用时扫描逐条跳过（见 library.rs），等待写入稳定后自然恢复。
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -16,8 +17,8 @@ use crate::library::{self, AppState};
 /// 防抖静默窗口：事件停止后等待该时长再重扫，避免复制大文件/连续保存触发多次扫描。
 const DEBOUNCE: Duration = Duration::from_millis(1200);
 
-/// 全局监听会话：同一时间只监听一个库（当前打开的库）。
-pub struct WatchState(pub Mutex<Option<WatchSession>>);
+/// 全局监听会话：按库 ID 保存，工作区内每个已打开的库一个 watcher。
+pub struct WatchState(pub Mutex<HashMap<String, WatchSession>>);
 
 pub struct WatchSession {
     #[allow(dead_code)] // 字段仅用于标识与调试，drop watcher 本身即停止监听
@@ -44,17 +45,50 @@ fn is_ignored_path(path: &Path) -> bool {
     false
 }
 
-/// 开始监听指定文档库；`library_id` 为空表示停止监听。
-pub fn start_watching(
+/// 同步监听集合：只保留 `library_ids` 中的库（新增的启动，多余的停止，已存在的保持不动）。
+/// 单个库启动失败（如文件夹不存在）不影响其他库，错误合并后返回。
+pub fn sync_watching(
     app: &AppHandle,
     conn: &rusqlite::Connection,
-    slot: &Mutex<Option<WatchSession>>,
+    slots: &Mutex<HashMap<String, WatchSession>>,
+    library_ids: Vec<String>,
+) -> Result<(), String> {
+    {
+        let mut map = slots.lock().unwrap();
+        let stale: Vec<String> = map
+            .keys()
+            .filter(|id| !library_ids.contains(id))
+            .cloned()
+            .collect();
+        for id in stale {
+            if let Some(session) = map.remove(&id) {
+                session.cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let mut errors = Vec::new();
+    for id in library_ids {
+        if slots.lock().unwrap().contains_key(&id) {
+            continue;
+        }
+        if let Err(e) = start_watching(app, conn, slots, id) {
+            errors.push(e);
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
+/// 开始监听指定文档库。
+fn start_watching(
+    app: &AppHandle,
+    conn: &rusqlite::Connection,
+    slots: &Mutex<HashMap<String, WatchSession>>,
     library_id: String,
 ) -> Result<(), String> {
-    stop_watching(slot);
-    if library_id.is_empty() {
-        return Ok(());
-    }
 
     let meta = library::get_library(conn, &library_id)?;
     if crate::openfile::is_adhoc_library(&meta) {
@@ -110,16 +144,8 @@ pub fn start_watching(
         }
     });
 
-    *slot.lock().unwrap() = Some(session);
+    slots.lock().unwrap().insert(session.library_id.clone(), session);
     Ok(())
-}
-
-/// 停止监听（幂等）。
-pub fn stop_watching(slot: &Mutex<Option<WatchSession>>) {
-    if let Some(session) = slot.lock().unwrap().take() {
-        session.cancel.store(true, Ordering::Relaxed);
-        // session drop → watcher 关闭 → 通道断开 → 防抖线程退出
-    }
 }
 
 /// 防抖到期：登记任务 → 重扫当前库 → 发送变更事件。

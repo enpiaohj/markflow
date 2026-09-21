@@ -144,8 +144,8 @@ export function searchLibrary(
 }
 
 /** libraryId 传空字符串表示停止监听 */
-export function setWatchedLibrary(libraryId: string): Promise<void> {
-  return invoke("set_watched_library", { libraryId });
+export function setWatchedLibraries(libraryIds: string[]): Promise<void> {
+  return invoke("set_watched_libraries", { libraryIds });
 }
 
 export function listTasks(): Promise<TaskInfo[]> {

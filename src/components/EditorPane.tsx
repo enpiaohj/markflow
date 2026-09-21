@@ -248,6 +248,8 @@ function SourceEditor({
       state: EditorState.create({
         doc: initial,
         extensions: [basicSetup, langExtension(format),
+          // 编辑器撑满容器，由内部 scroller 出滚动条（否则长文本被外层 overflow-hidden 截断）
+          CMEditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { overflow: "auto" } }),
           CMEditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) onChange(update.state.doc.toString());
           }),

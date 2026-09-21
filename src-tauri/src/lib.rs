@@ -183,15 +183,15 @@ fn search_library(
     )
 }
 
-/// 设置（或切换/停止）文件监听：`library_id` 传空字符串表示停止。
+/// 设置文件监听集合：工作区内所有已打开的库各监听一份；传空数组表示全部停止。
 #[tauri::command]
-fn set_watched_library(
+fn set_watched_libraries(
     app: AppHandle,
     state: State<'_, AppState>,
     watch: State<'_, WatchState>,
-    library_id: String,
+    library_ids: Vec<String>,
 ) -> Result<(), String> {
-    watch::start_watching(&app, &state.0.lock().unwrap(), &watch.0, library_id)
+    watch::sync_watching(&app, &state.0.lock().unwrap(), &watch.0, library_ids)
 }
 
 #[tauri::command]
@@ -1174,7 +1174,7 @@ pub fn run() {
         .setup(|app| {
             let conn = library::init_db(app.handle())?;
             app.manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(conn))));
-            app.manage(WatchState(std::sync::Mutex::new(None)));
+            app.manage(WatchState(std::sync::Mutex::new(std::collections::HashMap::new())));
             app.manage(tasks::TaskManager::default());
             // 外壳偏好：读取「关闭时最小化到通知区域」，需要时创建通知区域图标；
             // 开机自动拉起（--autostart）时按偏好隐藏到通知区域或最小化
@@ -1222,7 +1222,7 @@ pub fn run() {
             list_children,
             get_file_detail,
             search_library,
-            set_watched_library,
+            set_watched_libraries,
             list_tasks,
             cancel_task,
             clear_finished_tasks,

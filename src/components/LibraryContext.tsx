@@ -31,8 +31,15 @@ export type ViewRequestTarget = "home" | "library" | "search" | "graph" | "tasks
 interface LibraryContextValue {
   /** 索引数据库中的全部文档库（按最近打开排序） */
   libraries: LibraryMeta[];
-  /** 当前打开的文档库；null 表示未打开 */
+  /** 当前（活动）文档库；中央列表 / 详情 / 搜索默认针对它；null 表示未打开 */
   current: LibraryMeta | null;
+  /** 工作区：并列显示在左侧目录树中的已打开文档库，按名称排序 */
+  workspace: LibraryMeta[];
+  /** 左侧目录树中处于展开状态的文档库 ID（默认全部折叠，持久化） */
+  expandedLibs: Set<string>;
+  toggleLibExpanded: (id: string, expanded?: boolean) => void;
+  /** 从工作区移除（不删除磁盘文件、不移出索引）；有未保存修改先确认 */
+  closeLibraryInWorkspace: (id: string) => Promise<void>;
   /** 最近一次扫描状态（驱动状态栏展示） */
   scanStatus: ScanStatus;
   /** 建库向导是否打开 */
@@ -85,7 +92,7 @@ interface LibraryContextValue {
   /** 回到未打开状态 */
   closeCurrentLibrary: () => void;
   /** 聚焦到文档库中的某个文件（父目录 + 选中详情） */
-  requestFocusFile: (relativePath: string) => void;
+  requestFocusFile: (relativePath: string, libraryId?: string) => void;
   /** 在编辑器中打开文本文件 */
   openInEditor: (relativePath: string) => void;
   /** 关闭编辑器，返回文档库视图 */
@@ -105,12 +112,35 @@ interface LibraryContextValue {
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
 
+const LS_OPEN = "markflow.workspace.open";
+const LS_ACTIVE = "markflow.workspace.active";
+const LS_EXPANDED = "markflow.workspace.expanded";
+
+function readIds(key: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeIds(key: string, ids: string[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    /* 存储不可用时仅本次有效 */
+  }
+}
+
 const IDLE_SCAN: ScanStatus = { phase: "idle", libraryId: null, fileCount: 0, error: null };
 const INITIAL_VIEW: { target: ViewRequestTarget; nonce: number } = { target: "library", nonce: 0 };
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
   const [current, setCurrent] = useState<LibraryMeta | null>(null);
+  const [openIds, setOpenIds] = useState<string[]>(() => readIds(LS_OPEN));
+  const [expandedLibs, setExpandedLibs] = useState<Set<string>>(() => new Set(readIds(LS_EXPANDED)));
   const [scanStatus, setScanStatus] = useState<ScanStatus>(IDLE_SCAN);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [viewRequest, setViewRequest] = useState(INITIAL_VIEW);
@@ -146,15 +176,53 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const refreshLibraries = useCallback(async () => {
     try {
-      setLibraries(await api.listLibraries());
+      const list = await api.listLibraries();
+      setLibraries(list);
+      // 索引中已不存在的库（被移除 / 数据库重建）从工作区剔除
+      setOpenIds((prev) => (prev.every((id) => list.some((l) => l.id === id)) ? prev : prev.filter((id) => list.some((l) => l.id === id))));
+      return list;
     } catch (err) {
       console.error("加载文档库列表失败", err);
+      return null;
     }
   }, []);
 
+  const workspace = useMemo(
+    () =>
+      openIds
+        .map((id) => libraries.find((l) => l.id === id))
+        .filter((l): l is LibraryMeta => !!l)
+        .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN") || a.id.localeCompare(b.id)),
+    [openIds, libraries],
+  );
+
+  // 工作区与折叠状态持久化；工作区变化时同步文件监听集合
+  const libsLoadedRef = useRef(false);
   useEffect(() => {
-    void refreshLibraries();
-  }, [refreshLibraries]);
+    if (!libsLoadedRef.current) return; // 列表尚未加载时 openIds 可能含未校验的旧 ID，避免误写
+    writeIds(LS_OPEN, openIds);
+    api.setWatchedLibraries(openIds).catch((err) => console.error("启动文件监听失败", err));
+  }, [openIds]);
+  useEffect(() => {
+    writeIds(LS_EXPANDED, [...expandedLibs]);
+  }, [expandedLibs]);
+
+  const toggleLibExpanded = useCallback((id: string, expanded?: boolean) => {
+    setExpandedLibs((prev) => {
+      const has = prev.has(id);
+      const want = expanded ?? !has;
+      if (want === has) return prev;
+      const next = new Set(prev);
+      if (want) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const addToWorkspace = useCallback((meta: LibraryMeta) => {
+    if (meta.settings?.adhoc) return; // 单文件模式的隐式库不进工作区
+    setOpenIds((prev) => (prev.includes(meta.id) ? prev : [...prev, meta.id]));
+  }, []);
 
   // 后台扫描与文件监听事件
   useEffect(() => {
@@ -214,6 +282,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setViewerFile(null);
     setEditorDirty(false);
     setCurrent(meta);
+    addToWorkspace(meta);
+    writeIds(LS_ACTIVE, meta.settings?.adhoc ? [] : [meta.id]);
     setScanStatus({
       phase: meta.fileCount > 0 ? "done" : "idle",
       libraryId: meta.id,
@@ -222,10 +292,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     });
     setFocusFile(null);
     if (navigate) setViewRequest({ target: "library", nonce: Date.now() });
-    // 重新打开库时刷新索引（闭库期间的磁盘变化）并恢复监听；单文件模式的隐式库只索引已打开的文件
+    // 打开 / 激活库时刷新索引（期间的磁盘变化）；单文件模式的隐式库只索引已打开的文件
     api.rescanLibrary(id).catch((err) => console.error("重扫失败", err));
-    api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
-  }, []);
+  }, [addToWorkspace]);
 
   const switchToLibrary = useCallback(
     async (id: string) => {
@@ -244,11 +313,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setViewerFile(null);
     setEditorDirty(false);
     setCurrent(meta);
+    addToWorkspace(meta);
+    toggleLibExpanded(meta.id, true); // 刚创建的库展开一次，方便看到内容
+    writeIds(LS_ACTIVE, [meta.id]);
     setScanStatus({ phase: "scanning", libraryId: meta.id, fileCount: 0, error: null });
     setFocusFile(null);
     setViewRequest({ target: "library", nonce: Date.now() });
-    api.setWatchedLibrary(id).catch((err) => console.error("启动文件监听失败", err));
-  }, [confirmDiscard]);
+  }, [confirmDiscard, addToWorkspace, toggleLibExpanded]);
 
   const removeLibrary = useCallback(
     async (id: string) => {
@@ -260,11 +331,55 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setEditorDirty(false);
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
-        api.setWatchedLibrary("").catch(() => {});
       }
+      setOpenIds((prev) => prev.filter((x) => x !== id));
       await refreshLibraries();
     },
     [current, refreshLibraries, confirmDiscard],
+  );
+
+  // 启动时：加载列表后恢复上次的活动库（工作区本身已由 openIds 恢复，并补一次增量重扫）
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    void (async () => {
+      const list = await refreshLibraries();
+      libsLoadedRef.current = true;
+      if (restoredRef.current || !list) return;
+      restoredRef.current = true;
+      const valid = readIds(LS_OPEN).filter((id) => list.some((l) => l.id === id));
+      setOpenIds(valid);
+      api.setWatchedLibraries(valid).catch((err) => console.error("启动文件监听失败", err));
+      const active = readIds(LS_ACTIVE)[0];
+      for (const id of valid) {
+        if (id === active) continue;
+        api.rescanLibrary(id).catch((err) => console.error("重扫失败", err));
+      }
+      if (active && valid.includes(active)) {
+        try {
+          await switchLibraryCoreRef.current(active, false);
+        } catch (err) {
+          console.error("恢复活动文档库失败", err);
+        }
+      }
+    })();
+  }, [refreshLibraries]);
+
+  const closeLibraryInWorkspace = useCallback(
+    async (id: string) => {
+      if (current?.id === id) {
+        if (!(await confirmDiscard())) return;
+        setCurrent(null);
+        setScanStatus(IDLE_SCAN);
+        setFocusFile(null);
+        setOpenFile(null);
+        setViewerFile(null);
+        setDeliveryOpen(false);
+        setEditorDirty(false);
+        writeIds(LS_ACTIVE, []);
+      }
+      setOpenIds((prev) => prev.filter((x) => x !== id));
+    },
+    [current, confirmDiscard],
   );
 
   const requestView = useCallback((target: ViewRequestTarget) => {
@@ -280,20 +395,30 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestFocusFile = useCallback(
-    (relativePath: string) => {
-      void confirmDiscard().then((ok) => {
+    (relativePath: string, libraryId?: string) => {
+      void confirmDiscard().then(async (ok) => {
         if (!ok) return;
+        if (libraryId && currentIdRef.current !== libraryId) {
+          try {
+            await switchLibraryCoreRef.current(libraryId, false);
+          } catch (err) {
+            await dialog.alert(String(err), "无法打开文档库");
+            return;
+          }
+        }
         setOpenFile(null);
         setViewerFile(null);
         setFocusFile({ relativePath, nonce: Date.now() });
         setViewRequest({ target: "library", nonce: Date.now() });
       });
     },
-    [confirmDiscard],
+    [confirmDiscard, dialog],
   );
 
   const currentIdRef = useRef<string | null>(null);
   currentIdRef.current = current?.id ?? null;
+  const switchLibraryCoreRef = useRef(switchLibraryCore);
+  switchLibraryCoreRef.current = switchLibraryCore;
 
   const closeDocument = useCallback(async () => {
     if (!(await confirmDiscard())) return;
@@ -398,6 +523,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     () => ({
       libraries,
       current,
+      workspace,
+      expandedLibs,
+      toggleLibExpanded,
+      closeLibraryInWorkspace,
       scanStatus,
       wizardOpen,
       viewRequest,
@@ -421,16 +550,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       libraryCreated,
       removeLibrary,
       closeCurrentLibrary: () => {
-        void confirmDiscard().then((ok) => {
-          if (!ok) return;
-          setCurrent(null);
-          setScanStatus(IDLE_SCAN);
-          setFocusFile(null);
-          setOpenFile(null);
-          setViewerFile(null);
-          setEditorDirty(false);
-          api.setWatchedLibrary("").catch(() => {});
-        });
+        if (current) void closeLibraryInWorkspace(current.id);
+        else setOpenIds([]);
       },
       requestFocusFile,
       openInEditor: openInEditorGuarded,
@@ -448,7 +569,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
       closeDelivery: () => setDeliveryOpen(false),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
+    [libraries, current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile, confirmDiscard, closeDocument, openPath, pickAndOpenFile, openInEditorGuarded, openInViewerGuarded],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

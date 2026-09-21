@@ -11,10 +11,12 @@ import {
   Pencil,
   Link2,
   Loader2,
+  Plus,
   ShieldCheck,
   Star,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import FileTypeIcon from "../components/FileTypeIcon";
@@ -23,9 +25,17 @@ import * as api from "../lib/api";
 import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
 import { getOfficeEngine } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
-import type { FileEntry } from "../lib/types";
+import type { FileEntry, LibraryMeta } from "../lib/types";
 
 type SortKey = "name" | "mtime" | "size";
+
+/** 激活其他库后需要延后执行的动作可用的回调（取自新库渲染后的最新版本） */
+interface PendingHandlers {
+  handleSelect: (entry: FileEntry) => void;
+  openEntry: (entry: FileEntry) => void;
+  navigate: (path: string) => void;
+  openInEditor: (relativePath: string) => void;
+}
 
 const SMART_COLLECTIONS = [
   { label: "最近使用", icon: Clock },
@@ -109,6 +119,153 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
   );
 }
 
+
+/**
+ * 工作区中的一个文档库：库名行（可折叠）+ 该库的目录树。
+ * 每个库自己持有目录缓存；折叠时不加载，展开后才读取根目录。
+ */
+function LibrarySection({
+  lib,
+  active,
+  expanded,
+  contentVersion,
+  selectedPath,
+  onToggle,
+  onActivate,
+  onClose,
+  onNewFile,
+  onNewFolder,
+  onSelect,
+  onOpen,
+  onContextMenu,
+}: {
+  lib: LibraryMeta;
+  active: boolean;
+  expanded: boolean;
+  contentVersion: number;
+  selectedPath: string | null;
+  onToggle: () => void;
+  onActivate: () => void;
+  onClose: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
+  onSelect: (entry: FileEntry) => void;
+  onOpen: (entry: FileEntry) => void;
+  onContextMenu: (entry: FileEntry, x: number, y: number) => void;
+}) {
+  const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
+  const [dirExpanded, setDirExpanded] = useState<Set<string>>(new Set());
+  const [cache, setCache] = useState<Map<string, FileEntry[]>>(new Map());
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+
+  const load = useCallback(async (dir: string): Promise<FileEntry[]> => {
+    try {
+      return await api.listChildren(lib.id, dir);
+    } catch (err) {
+      console.error("加载目录失败", err);
+      return [];
+    }
+  }, [lib.id]);
+
+  // 展开 / 内容变化 → 刷新根目录与已展开目录（保留展开状态）
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    (async () => {
+      const root = await load("");
+      if (cancelled) return;
+      setTreeRoot(root);
+      for (const p of [...cacheRef.current.keys()]) {
+        const children = await load(p);
+        if (cancelled) return;
+        setCache((prev) => new Map(prev).set(p, children));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, contentVersion, load]);
+
+  const toggleDir = useCallback(
+    async (entry: FileEntry) => {
+      const path = entry.relativePath;
+      setDirExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      if (!cacheRef.current.has(path)) {
+        const entries = await load(path);
+        setCache((prev) => new Map(prev).set(path, entries));
+      }
+    },
+    [load],
+  );
+
+  const ctx: TreeCtx = {
+    expanded: dirExpanded,
+    cache,
+    toggle: (e) => void toggleDir(e),
+    selectedPath,
+    onSelect,
+    onOpen,
+    onContextMenu,
+  };
+
+  return (
+    <div className="mb-1">
+      <div
+        className={`group flex items-center gap-0.5 rounded-md pr-1 ${active ? "bg-primary-50" : "hover:bg-gray-100"}`}
+        title={lib.rootPath}
+      >
+        <button
+          type="button"
+          aria-label={expanded ? "折叠文档库" : "展开文档库"}
+          onClick={onToggle}
+          className="flex h-7 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-600"
+        >
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={onActivate}
+          onDoubleClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+        >
+          <FolderOpen className={`h-4 w-4 shrink-0 ${active ? "text-primary-600" : "text-gray-400"}`} />
+          <span className={`truncate text-[13px] font-semibold ${active ? "text-primary-700" : "text-gray-800"}`}>{lib.name}</span>
+          <span className="shrink-0 text-[11px] text-gray-400">{lib.fileCount.toLocaleString()}</span>
+        </button>
+        <span className="hidden shrink-0 gap-0.5 group-hover:flex">
+          <button type="button" title={`在「${lib.name}」根目录新建文档`} onClick={onNewFile}
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-primary-600">
+            <FilePlus2 className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" title={`在「${lib.name}」根目录新建文件夹`} onClick={onNewFolder}
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-primary-600">
+            <FolderPlus className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" title={`从工作区关闭「${lib.name}」（不删除文件）`} onClick={onClose}
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-red-600">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </span>
+      </div>
+      {expanded && (
+        <div className="ml-2 border-l border-gray-100 pl-1">
+          {treeRoot.length === 0 ? (
+            <p className="py-1 pl-4 text-xs text-gray-400">（空）</p>
+          ) : (
+            treeRoot.map((entry) => <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />)
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -116,13 +273,10 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
  * 左侧目录树与智能集合 · 中央文件列表 · 右侧详情面板。
  */
 export default function LibraryView() {
-  const { current, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, openFile, closeFile } = useLibrary();
+  const { current, workspace, expandedLibs, toggleLibExpanded, closeLibraryInWorkspace, switchToLibrary, scanStatus, openWizard, contentVersion, focusFile, openInEditor, openInViewer, openDelivery, openFile, closeFile } = useLibrary();
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [currentDir, setCurrentDir] = useState("");
-  const [treeRoot, setTreeRoot] = useState<FileEntry[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [cache, setCache] = useState<Map<string, FileEntry[]>>(new Map());
   const [list, setList] = useState<FileEntry[]>([]);
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>({ key: "name", asc: true });
   const [selected, setSelected] = useState<FileEntry | null>(null);
@@ -138,13 +292,13 @@ export default function LibraryView() {
     return () => window.clearTimeout(t);
   }, [current, selected]);
   /** 右键菜单位置与目标 */
-  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null);
-  /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动 */
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry; lib: LibraryMeta } | null>(null);
+  /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动；`lib` 明确记录操作所属的文档库 */
   const [dialog, setDialog] = useState<
-    | { kind: "new-file"; dir: string }
-    | { kind: "new-folder"; dir: string }
-    | { kind: "rename"; entry: FileEntry }
-    | { kind: "move"; entry: FileEntry }
+    | { kind: "new-file"; dir: string; lib: LibraryMeta }
+    | { kind: "new-folder"; dir: string; lib: LibraryMeta }
+    | { kind: "rename"; entry: FileEntry; lib: LibraryMeta }
+    | { kind: "move"; entry: FileEntry; lib: LibraryMeta }
     | null
   >(null);
   const [dirOptions, setDirOptions] = useState<string[]>([]);
@@ -168,50 +322,38 @@ export default function LibraryView() {
   const libraryId = current?.id;
   useEffect(() => {
     if (!libraryId) return;
-    let cancelled = false;
     setCurrentDir("");
-    setExpanded(new Set());
-    setCache(new Map());
     setSelected(null);
-    void loadDir(libraryId, "").then((entries) => {
-      if (!cancelled) {
-        setTreeRoot(entries);
-        setList(entries);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [libraryId, loadDir]);
+    setList([]);
+  }, [libraryId]);
 
-  // 扫描完成 / 文件监听重扫 → 刷新根目录、已展开目录与当前列表（保留展开状态与选中）
-  const cacheRef = useRef(cache);
-  cacheRef.current = cache;
+  // 在非活动库的目录树里操作时：先激活该库，待其渲染完成后再执行（此时 current / 各回调都已是新库的）
+  const pendingRef = useRef<{ libId: string; run: (h: PendingHandlers) => void } | null>(null);
+  const handlersRef = useRef<PendingHandlers>(null as unknown as PendingHandlers);
+  useEffect(() => {
+    const p = pendingRef.current;
+    if (p && p.libId === libraryId) {
+      pendingRef.current = null;
+      p.run(handlersRef.current);
+    }
+  }, [libraryId]);
+
+  /** 对 `lib` 中的条目执行动作：本库直接执行，其他库先激活再执行 */
+  function inLibrary(lib: LibraryMeta, run: (h: PendingHandlers) => void) {
+    if (current?.id === lib.id) {
+      run(handlersRef.current);
+      return;
+    }
+    pendingRef.current = { libId: lib.id, run };
+    void switchToLibrary(lib.id).then(() => {
+      // 用户取消（有未保存修改时放弃切换）→ 清掉待办
+      if (pendingRef.current?.libId === lib.id && currentIdNow.current !== lib.id) pendingRef.current = null;
+    });
+  }
+  const currentIdNow = useRef<string | undefined>(undefined);
+  currentIdNow.current = current?.id;
   const currentDirRef = useRef(currentDir);
   currentDirRef.current = currentDir;
-  useEffect(() => {
-    if (!current) return;
-    let cancelled = false;
-    (async () => {
-      const rootEntries = await loadDir(current.id, "");
-      if (cancelled) return;
-      setTreeRoot(rootEntries);
-      // 刷新所有已展开目录的子项（保留展开状态）
-      const paths = [...cacheRef.current.keys()];
-      for (const p of paths) {
-        const children: FileEntry[] = await loadDir(current.id, p);
-        if (cancelled) return;
-        setCache((prev) => new Map(prev).set(p, children));
-      }
-      // 当前目录列表同步刷新
-      const dir = currentDirRef.current;
-      const listEntries = dir === "" ? rootEntries : await loadDir(current.id, dir);
-      if (!cancelled) setList(listEntries);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [current, contentVersion, loadDir]);
 
   // 搜索结果点击聚焦：跳到文件所在目录并选中
   useEffect(() => {
@@ -241,26 +383,7 @@ export default function LibraryView() {
     return () => {
       cancelled = true;
     };
-  }, [current, currentDir, loadDir]);
-
-  // 目录树展开 → 懒加载子目录
-  const toggleDir = useCallback(
-    async (entry: FileEntry) => {
-      if (!current) return;
-      const path = entry.relativePath;
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      if (!cache.has(path)) {
-        const entries = await loadDir(current.id, path);
-        setCache((prev) => new Map(prev).set(path, entries));
-      }
-    },
-    [current, cache, loadDir],
-  );
+  }, [current, currentDir, contentVersion, loadDir]);
 
   function navigate(path: string) {
     setCurrentDir(path);
@@ -271,6 +394,8 @@ export default function LibraryView() {
     setSelected(entry);
     if (entry.isDir) setCurrentDir(entry.relativePath);
   }
+
+  handlersRef.current = { handleSelect, openEntry, navigate, openInEditor };
 
   /** 统一打开路由：目录进入；PDF/Office/图片进查看器；文本类进编辑器 */
   function openEntry(entry: FileEntry) {
@@ -313,31 +438,30 @@ export default function LibraryView() {
 
   // ---- 目录树文件操作（§6.3：冲突校验 + 操作后自动重扫） ----
 
-  function openContext(entry: FileEntry, x: number, y: number) {
-    setSelected(entry);
-    setMenu({ x, y, entry });
+  function openContext(entry: FileEntry, x: number, y: number, lib: LibraryMeta) {
+    if (current?.id === lib.id) setSelected(entry);
+    setMenu({ x, y, entry, lib });
   }
 
-  function openNewFile(dir: string) {
+  function openNewFile(dir: string, lib: LibraryMeta) {
     setNameInput("新建文档.md");
-    setDialog({ kind: "new-file", dir });
+    setDialog({ kind: "new-file", dir, lib });
   }
 
-  function openNewFolder(dir: string) {
+  function openNewFolder(dir: string, lib: LibraryMeta) {
     setNameInput("新建文件夹");
-    setDialog({ kind: "new-folder", dir });
+    setDialog({ kind: "new-folder", dir, lib });
   }
 
-  function openRename(entry: FileEntry) {
+  function openRename(entry: FileEntry, lib: LibraryMeta) {
     setNameInput(entry.name);
-    setDialog({ kind: "rename", entry });
+    setDialog({ kind: "rename", entry, lib });
   }
 
-  async function openMove(entry: FileEntry) {
-    if (!current) return;
-    setDialog({ kind: "move", entry });
+  async function openMove(entry: FileEntry, lib: LibraryMeta) {
+    setDialog({ kind: "move", entry, lib });
     try {
-      const dirs = await api.listLibraryDirs(current.id);
+      const dirs = await api.listLibraryDirs(lib.id);
       setDirOptions(dirs);
       setMoveTarget(entry.parentPath);
     } catch (err) {
@@ -346,7 +470,6 @@ export default function LibraryView() {
   }
 
   async function runOperation(action: () => Promise<unknown>, successHint?: string) {
-    if (!current) return;
     setBusy(true);
     try {
       await action();
@@ -360,18 +483,18 @@ export default function LibraryView() {
     }
   }
 
-  async function confirmDelete(entry: FileEntry) {
+  async function confirmDelete(entry: FileEntry, lib: LibraryMeta) {
     const ok = await appDialog.confirm({
       title: "删除到回收站",
       message:
-        `确定删除「${entry.relativePath}」吗？\n\n` +
+        `确定删除「${lib.name}」中的「${entry.relativePath}」吗？\n\n` +
         (entry.isDir ? "整个文件夹（含全部内容）将" : "文件将") +
         "移入系统回收站，可从回收站还原；MarkFlow 索引会自动更新。",
       confirmText: "删除",
       danger: true,
     });
     if (!ok) return;
-    void runOperation(() => api.deleteLibraryEntry(current!.id, entry.relativePath));
+    void runOperation(() => api.deleteLibraryEntry(lib.id, entry.relativePath));
   }
 
   function toggleSort(key: SortKey) {
@@ -394,7 +517,7 @@ export default function LibraryView() {
     return [...dirs.sort(by), ...files.sort(by)];
   }, [list, sort]);
 
-  if (!current) {
+  if (!current && workspace.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6">
         <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
@@ -415,18 +538,9 @@ export default function LibraryView() {
     );
   }
 
-  const isScanning = scanStatus.phase === "scanning" && scanStatus.libraryId === current.id;
-  const scanFailed = scanStatus.phase === "failed" && scanStatus.libraryId === current.id;
+  const isScanning = !!current && scanStatus.phase === "scanning" && scanStatus.libraryId === current.id;
+  const scanFailed = !!current && scanStatus.phase === "failed" && scanStatus.libraryId === current.id;
   const crumbs = currentDir === "" ? [] : currentDir.split("/");
-  const treeCtx: TreeCtx = {
-    expanded,
-    cache,
-    toggle: (e) => void toggleDir(e),
-    selectedPath: selected?.relativePath ?? null,
-    onSelect: handleSelect,
-    onOpen: openEntry,
-    onContextMenu: openContext,
-  };
 
   const sortIcon = (key: SortKey) =>
     sort.key !== key ? null : sort.asc ? (
@@ -439,10 +553,6 @@ export default function LibraryView() {
     <div className="flex h-full min-h-0">
       {/* 左侧：库信息、智能集合、目录树 */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
-        <div className="border-b border-gray-100 px-4 py-3">
-          <p className="truncate text-sm font-semibold text-gray-900">{current.name}</p>
-          <p className="mt-0.5 text-xs text-gray-400">{current.fileCount.toLocaleString()} 个文件</p>
-        </div>
         <div className="space-y-0.5 border-b border-gray-100 px-2 py-2">
           {SMART_COLLECTIONS.map(({ label, icon: Icon }) => (
             <button
@@ -459,33 +569,45 @@ export default function LibraryView() {
           ))}
         </div>
         <p className="flex items-center justify-between px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-gray-400">
-          目录
-          <span className="flex gap-1">
-            <button
-              type="button"
-              title="在库根目录新建文档"
-              onClick={() => openNewFile("")}
-              className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
-            >
-              <FilePlus2 className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              title="在库根目录新建文件夹"
-              onClick={() => openNewFolder("")}
-              className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
-            >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
-          </span>
+          文档库（{workspace.length}）
+          <button
+            type="button"
+            title="创建或打开另一个文档库，并列显示在此处"
+            onClick={openWizard}
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
         </p>
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {treeRoot.map((entry) => (
-            <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={treeCtx} />
+          {workspace.map((lib) => (
+            <LibrarySection
+              key={lib.id}
+              lib={lib}
+              active={current?.id === lib.id}
+              expanded={expandedLibs.has(lib.id)}
+              contentVersion={contentVersion}
+              selectedPath={current?.id === lib.id ? (selected?.relativePath ?? null) : null}
+              onToggle={() => toggleLibExpanded(lib.id)}
+              onActivate={() => inLibrary(lib, (h) => h.navigate(""))}
+              onClose={() => void closeLibraryInWorkspace(lib.id)}
+              onNewFile={() => openNewFile("", lib)}
+              onNewFolder={() => openNewFolder("", lib)}
+              onSelect={(entry) => inLibrary(lib, (h) => h.handleSelect(entry))}
+              onOpen={(entry) => inLibrary(lib, (h) => h.openEntry(entry))}
+              onContextMenu={(entry, x, y) => openContext(entry, x, y, lib)}
+            />
           ))}
         </nav>
       </aside>
 
+      {!current && (
+        <div className="flex min-w-0 flex-1 flex-col items-center justify-center text-gray-400">
+          <FolderOpen className="h-8 w-8" />
+          <p className="mt-3 text-sm">在左侧选择一个文档库</p>
+        </div>
+      )}
+      {current && (<>
       {/* 中央：面包屑 + 文件列表 */}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-1 border-b border-gray-200 bg-white px-4 py-2 text-[13px]">
@@ -519,8 +641,8 @@ export default function LibraryView() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => openNewFile(currentDir)}
-              title="在当前目录新建 Markdown 文档"
+              onClick={() => openNewFile(currentDir, current)}
+              title={`在「${current.name}」的当前目录新建 Markdown 文档`}
               className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50"
             >
               <FilePlus2 className="h-3.5 w-3.5" />
@@ -691,6 +813,8 @@ export default function LibraryView() {
         )}
       </aside>
 
+      </>)}
+
       {/* 右键菜单 */}
       {menu && (
         <>
@@ -706,22 +830,23 @@ export default function LibraryView() {
             className="fixed z-50 w-44 rounded-lg border border-gray-200 bg-white py-1 text-[13px] shadow-xl"
             style={{ left: menu.x, top: menu.y }}
           >
+            <p className="truncate px-3 pb-1 pt-0.5 text-[11px] text-gray-400">{menu.lib.name}</p>
             {menu.entry.isDir && (
               <>
                 <MenuItem icon={<FilePlus2 className="h-3.5 w-3.5" />} label="新建文档"
-                  onClick={() => { const d = menu.entry.relativePath; setMenu(null); openNewFile(d); }} />
+                  onClick={() => { const d = menu.entry.relativePath; const l = menu.lib; setMenu(null); openNewFile(d, l); }} />
                 <MenuItem icon={<FolderPlus className="h-3.5 w-3.5" />} label="新建文件夹"
-                  onClick={() => { const d = menu.entry.relativePath; setMenu(null); openNewFolder(d); }} />
+                  onClick={() => { const d = menu.entry.relativePath; const l = menu.lib; setMenu(null); openNewFolder(d, l); }} />
                 <MenuDivider />
               </>
             )}
             <MenuItem icon={<Pencil className="h-3.5 w-3.5" />} label="重命名"
-              onClick={() => { const e2 = menu.entry; setMenu(null); openRename(e2); }} />
+              onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); openRename(e2, l); }} />
             <MenuItem icon={<Import className="h-3.5 w-3.5" />} label="移动到…"
-              onClick={() => { const e2 = menu.entry; setMenu(null); void openMove(e2); }} />
+              onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); void openMove(e2, l); }} />
             <MenuDivider />
             <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="删除（进回收站）" danger
-              onClick={() => { const e2 = menu.entry; setMenu(null); confirmDelete(e2); }} />
+              onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); void confirmDelete(e2, l); }} />
           </div>
         </>
       )}
@@ -733,6 +858,7 @@ export default function LibraryView() {
             {(dialog.kind === "new-file" || dialog.kind === "new-folder") && (
               <NameDialog
                 title={dialog.kind === "new-file" ? "新建文档" : "新建文件夹"}
+                libName={dialog.lib.name}
                 location={dialog.dir || "库根目录"}
                 value={nameInput}
                 onChange={setNameInput}
@@ -744,10 +870,11 @@ export default function LibraryView() {
                   const name = nameInput.trim();
                   void runOperation(async () => {
                     if (dialog.kind === "new-file") {
-                      await api.createTextFile(current!.id, dir, name, "# 新建文档");
-                      openInEditor(dir ? dir + "/" + name : name);
+                      await api.createTextFile(dialog.lib.id, dir, name, "# 新建文档");
+                      const rel = dir ? dir + "/" + name : name;
+                      inLibrary(dialog.lib, (h) => h.openInEditor(rel));
                     } else {
-                      await api.createLibraryDirectory(current!.id, dir, name);
+                      await api.createLibraryDirectory(dialog.lib.id, dir, name);
                     }
                   });
                 }}
@@ -756,6 +883,7 @@ export default function LibraryView() {
             {dialog.kind === "rename" && (
               <NameDialog
                 title="重命名"
+                libName={dialog.lib.name}
                 location={dialog.entry.relativePath}
                 value={nameInput}
                 onChange={setNameInput}
@@ -766,8 +894,8 @@ export default function LibraryView() {
                   const e2 = dialog.entry;
                   const name = nameInput.trim();
                   void runOperation(async () => {
-                    await api.renameLibraryEntry(current!.id, e2.relativePath, name);
-                    if (openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
+                    await api.renameLibraryEntry(dialog.lib.id, e2.relativePath, name);
+                    if (current?.id === dialog.lib.id && openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
                       closeFile();
                     }
                   });
@@ -776,7 +904,10 @@ export default function LibraryView() {
             )}
             {dialog.kind === "move" && (
               <>
-                <h3 className="text-[15px] font-semibold text-gray-900">移动到…</h3>
+                <h3 className="text-[15px] font-semibold text-gray-900">
+                  移动到…
+                  <LibBadge name={dialog.lib.name} />
+                </h3>
                 <p className="mt-1 text-xs text-gray-400">{dialog.entry.relativePath}</p>
                 <select
                   value={moveTarget}
@@ -798,8 +929,8 @@ export default function LibraryView() {
                     const e2 = dialog.entry;
                     const target = moveTarget;
                     void runOperation(async () => {
-                      await api.moveLibraryEntry(current!.id, e2.relativePath, target);
-                      if (openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
+                      await api.moveLibraryEntry(dialog.lib.id, e2.relativePath, target);
+                      if (current?.id === dialog.lib.id && openFile?.relativePath && (openFile.relativePath === e2.relativePath || openFile.relativePath.startsWith(e2.relativePath + "/"))) {
                         closeFile();
                       }
                     });
@@ -843,8 +974,18 @@ function MenuItem({
   );
 }
 
+function LibBadge({ name }: { name: string }) {
+  return (
+    <span className="ml-2 inline-flex max-w-[200px] items-center gap-1 truncate rounded-md bg-primary-50 px-1.5 py-0.5 align-middle text-xs font-medium text-primary-700">
+      <FolderOpen className="h-3 w-3 shrink-0" />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
 function NameDialog({
   title,
+  libName,
   location,
   value,
   onChange,
@@ -854,6 +995,7 @@ function NameDialog({
   disabled,
 }: {
   title: string;
+  libName: string;
   location?: string;
   value: string;
   onChange: (v: string) => void;
@@ -866,6 +1008,7 @@ function NameDialog({
     <>
       <h3 className="text-[15px] font-semibold text-gray-900">
         {title}
+        <LibBadge name={libName} />
         {location && <span className="ml-1.5 text-xs font-normal text-gray-400">位置：{location}</span>}
       </h3>
       <input
