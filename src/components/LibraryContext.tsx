@@ -40,6 +40,9 @@ interface LibraryContextValue {
   focusFile: { relativePath: string; nonce: number } | null;
   /** 当前在编辑器中打开的文件；null 表示编辑器关闭 */
   openFile: { relativePath: string; nonce: number } | null;
+  /** 编辑器是否存在未保存修改（切换视图时用于离开确认） */
+  editorDirty: boolean;
+  setEditorDirty: (dirty: boolean) => void;
   /** 正式交付中心是否打开 */
   deliveryOpen: boolean;
   /** 当前在只读查看器中打开的文件（PDF / Office 快速预览 / LibreOffice 高保真） */
@@ -90,6 +93,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [contentVersion, setContentVersion] = useState(0);
   const [focusFile, setFocusFile] = useState<{ relativePath: string; nonce: number } | null>(null);
   const [openFile, setOpenFile] = useState<{ relativePath: string; nonce: number } | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<{
     relativePath: string;
@@ -164,6 +168,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const switchToLibrary = useCallback(async (id: string) => {
     const meta = await api.openLibrary(id);
+    setOpenFile(null);
+    setViewerFile(null);
+    setEditorDirty(false);
     setCurrent(meta);
     setScanStatus({
       phase: meta.fileCount > 0 ? "done" : "idle",
@@ -180,6 +187,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     setWizardOpen(false);
     const meta = await api.openLibrary(id);
     setLibraries((prev) => [meta, ...prev.filter((l) => l.id !== id)]);
+    setOpenFile(null);
+    setViewerFile(null);
+    setEditorDirty(false);
     setCurrent(meta);
     setScanStatus({ phase: "scanning", libraryId: meta.id, fileCount: 0, error: null });
     setFocusFile(null);
@@ -191,6 +201,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       await api.removeLibrary(id);
       if (current?.id === id) {
+        setOpenFile(null);
+        setViewerFile(null);
+        setEditorDirty(false);
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
         api.setWatchedLibrary("").catch(() => {});
@@ -209,6 +222,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestFocusFile = useCallback((relativePath: string) => {
+    setOpenFile(null);
+    setViewerFile(null);
     setFocusFile({ relativePath, nonce: Date.now() });
     setViewRequest({ target: "library", nonce: Date.now() });
   }, []);
@@ -223,6 +238,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       contentVersion,
       focusFile,
       openFile,
+      editorDirty,
+      setEditorDirty,
       deliveryOpen,
       viewerFile,
       openWizard: () => setWizardOpen(true),
@@ -236,26 +253,35 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         setCurrent(null);
         setScanStatus(IDLE_SCAN);
         setFocusFile(null);
+        setOpenFile(null);
+        setViewerFile(null);
+        setEditorDirty(false);
         api.setWatchedLibrary("").catch(() => {});
       },
       requestFocusFile,
       openInEditor: (relativePath: string) => {
         setFocusFile(null);
+        setViewerFile(null);
+        setDeliveryOpen(false);
         setOpenFile({ relativePath, nonce: Date.now() });
       },
       closeFile: () => setOpenFile(null),
       openInViewer: (relativePath: string, kind: "pdf" | "office" | "hifi" | "image", bytes?: ArrayBuffer) => {
         setOpenFile(null);
+        setDeliveryOpen(false);
+        setFocusFile(null);
         setViewerFile({ relativePath, kind, nonce: Date.now(), bytes });
       },
       closeViewer: () => setViewerFile(null),
       openDelivery: () => {
         setOpenFile(null);
+        setViewerFile(null);
+        setFocusFile(null);
         setDeliveryOpen(true);
       },
       closeDelivery: () => setDeliveryOpen(false),
     }),
-    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, deliveryOpen, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
+    [libraries, current, scanStatus, wizardOpen, viewRequest, contentVersion, focusFile, openFile, editorDirty, deliveryOpen, viewerFile, requestSearchView, requestTasksView, switchToLibrary, libraryCreated, removeLibrary, requestFocusFile],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

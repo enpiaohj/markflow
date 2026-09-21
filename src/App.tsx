@@ -36,11 +36,23 @@ const placeholderViews: Record<
 /** 应用外壳：标题栏 + 活动栏 + 主视图 + 状态栏 + 建库向导 */
 function Shell() {
   const [activeView, setActiveView] = useState<ViewId>("home");
-  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, current } = useLibrary();
+  const { viewRequest, requestSearchView, openFile, viewerFile, deliveryOpen, editorDirty, closeFile, closeViewer, current } = useLibrary();
+
+  /** 统一的视图切换入口：编辑器/查看器打开时先关闭（有未保存修改则确认） */
+  function selectView(id: ViewId) {
+    if (openFile && editorDirty && !window.confirm("当前文档有未保存的修改，离开将丢失这些修改。\n确定继续吗？")) {
+      return;
+    }
+    if (openFile) closeFile();
+    if (viewerFile) closeViewer();
+    setActiveView(id);
+  }
 
   // 视图切换请求：切换/创建文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
   useEffect(() => {
-    if (viewRequest.nonce > 0) setActiveView(viewRequest.target);
+    if (viewRequest.nonce > 0) selectView(viewRequest.target);
+    // 仅响应 viewRequest 变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewRequest]);
 
   // 全局快捷键 Ctrl+K 打开搜索
@@ -59,7 +71,7 @@ function Shell() {
     <div className="flex h-full flex-col overflow-hidden bg-gray-50 text-gray-900">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
-        <ActivityBar activeView={activeView} onSelect={setActiveView} />
+        <ActivityBar activeView={activeView} onSelect={selectView} />
         <main className="min-w-0 flex-1 overflow-hidden">
           {openFile && current ? (
             <EditorPane />

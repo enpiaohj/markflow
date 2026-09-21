@@ -42,6 +42,7 @@ interface TreeCtx {
   toggle: (entry: FileEntry) => void;
   selectedPath: string | null;
   onSelect: (entry: FileEntry) => void;
+  onOpen: (entry: FileEntry) => void;
   onContextMenu: (entry: FileEntry, x: number, y: number) => void;
 }
 
@@ -55,12 +56,12 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
       <button
         type="button"
         onClick={() => ctx.onSelect(entry)}
-        onDoubleClick={() => entry.isDir && ctx.toggle(entry)}
+        onDoubleClick={() => ctx.onOpen(entry)}
         onContextMenu={(e) => {
           e.preventDefault();
           ctx.onContextMenu(entry, e.clientX, e.clientY);
         }}
-        title={entry.name}
+        title={entry.isDir ? "双击展开/收起" : "双击打开（编辑 / 预览）"}
         className={`flex w-full items-center gap-1 rounded-md py-1.5 pr-2 text-left text-[13px] transition-colors ${
           selected ? "bg-primary-50 text-primary-700" : "text-gray-700 hover:bg-gray-100"
         }`}
@@ -210,6 +211,23 @@ export default function LibraryView() {
     if (entry.isDir) setCurrentDir(entry.relativePath);
   }
 
+  /** 统一打开路由：目录进入；PDF/Office/图片进查看器；文本类进编辑器 */
+  function openEntry(entry: FileEntry) {
+    if (entry.isDir) {
+      navigate(entry.relativePath);
+      return;
+    }
+    if (entry.format === "pdf") {
+      openInViewer(entry.relativePath, "pdf");
+    } else if (entry.format === "word" || entry.format === "excel" || entry.format === "powerpoint") {
+      openInViewer(entry.relativePath, "office");
+    } else if (entry.format === "image") {
+      openInViewer(entry.relativePath, "image");
+    } else if (EDITABLE_FORMATS.has(entry.format)) {
+      openInEditor(entry.relativePath);
+    }
+  }
+
   async function startImport() {
     if (!current) return;
     const selected = await openFileDialog({
@@ -345,6 +363,7 @@ export default function LibraryView() {
     toggle: (e) => void toggleDir(e),
     selectedPath: selected?.relativePath ?? null,
     onSelect: handleSelect,
+    onOpen: openEntry,
     onContextMenu: openContext,
   };
 
