@@ -1,0 +1,106 @@
+/** 用户偏好（存于 WebView 本地存储；读写失败时回退默认值，不影响功能） */
+
+const AUTOSAVE_KEY = "mf-pref-autosave";
+
+export function getAutosave(): boolean {
+  try {
+    return localStorage.getItem(AUTOSAVE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setAutosave(on: boolean): void {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, on ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
+const OFFICE_ENGINE_KEY = "mf-pref-office-engine";
+
+/**
+ * Office 预览引擎偏好：builtin = 始终使用内置渲染（默认：即时显示、不启动 Office、有目录导航）；
+ * auto = 有 Microsoft Office / LibreOffice 时优先用它们导出的精确版式。
+ * 只有用户在设置里明确选过 auto 才使用 auto。
+ */
+export type OfficeEnginePref = "auto" | "builtin";
+
+export function getOfficeEngine(): OfficeEnginePref {
+  try {
+    return localStorage.getItem(OFFICE_ENGINE_KEY) === "auto" ? "auto" : "builtin";
+  } catch {
+    return "builtin";
+  }
+}
+
+export function setOfficeEngine(pref: OfficeEnginePref): void {
+  try {
+    localStorage.setItem(OFFICE_ENGINE_KEY, pref);
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
+const LAYOUT_KEY = "mf-pref-library-layout";
+
+/** 左侧文档库列表布局：selector 单库 + 顶部选择器（默认）/ side 并列多库（各库可折叠） */
+export type LibraryLayoutPref = "selector" | "side";
+
+export function getLibraryLayout(): LibraryLayoutPref {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === "side" ? "side" : "selector";
+  } catch {
+    return "selector";
+  }
+}
+
+export function setLibraryLayout(pref: LibraryLayoutPref): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, pref);
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
+const THEME_KEY = "mf-pref-theme";
+
+/** 主题：light 浅色（默认）/ dark 深色 / system 跟随系统 */
+export type ThemePref = "light" | "dark" | "system";
+
+export function getTheme(): ThemePref {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return v === "dark" || v === "system" ? v : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** 按偏好给 <html> 加 / 去 dark 类（深色主题通过重映射颜色变量实现，见 index.css） */
+export function applyTheme(): void {
+  const pref = getTheme();
+  const dark = pref === "dark" || (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+export function setTheme(pref: ThemePref): void {
+  try {
+    localStorage.setItem(THEME_KEY, pref);
+  } catch {
+    /* 存储不可用时仍在本次会话生效 */
+  }
+  applyTheme();
+}
+
+/** 启动时调用：应用主题，并在「跟随系统」下响应系统主题切换 */
+export function initTheme(): void {
+  applyTheme();
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (getTheme() === "system") applyTheme();
+  });
+}
