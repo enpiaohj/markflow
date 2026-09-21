@@ -21,7 +21,7 @@ export default function TabStrip() {
   const dupName = (t: DocTab) => names.filter((n) => n === nameOf(t)).length > 1;
 
   return (
-    <div role="tablist" className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none]">
+    <div role="tablist" data-tauri-drag-region className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none]">
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
         const name = nameOf(tab);
