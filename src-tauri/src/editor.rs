@@ -22,6 +22,8 @@ pub struct TextFileContent {
     /// 读取时的磁盘 mtime，作为保存时的冲突检测基线
     pub base_mtime: i64,
     pub size: i64,
+    /// 检测到的磁盘编码（保存时按原编码写回）
+    pub encoding: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -69,10 +71,12 @@ pub fn read_text_file(conn: &Connection, library_id: &str, relative_path: &str) 
     }
     let path = content_file_path(conn, library_id, relative_path)?;
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let decoded = crate::textenc::decode(&bytes)?;
     Ok(TextFileContent {
-        content: String::from_utf8_lossy(&bytes).to_string(),
+        content: decoded.text,
         base_mtime: file_mtime(&path),
         size: bytes.len() as i64,
+        encoding: decoded.encoding.label().to_string(),
     })
 }
 
@@ -108,11 +112,12 @@ pub fn save_text_file(
         ));
     }
 
-    // 2. 保存前自动快照当前磁盘版本（§8.14）
-    snapshot_current(conn, library_id, relative_path, &path)?;
+    // 2. 按磁盘原编码 / 原换行符编码内容（无法无损编码则中止，不损坏文件）
+    let bytes = encode_like_disk(&path, content)?;
 
-    // 3. 原子写入：同目录临时文件 → fsync → 原子替换
-    atomic_write(&path, content.as_bytes())?;
+    // 3. 保存前自动快照当前磁盘版本（§8.14），再原子写入：同目录临时文件 → fsync → 原子替换
+    snapshot_current(conn, library_id, relative_path, &path)?;
+    atomic_write(&path, &bytes)?;
 
     // 4. 更新索引行与全文检索
     let outcome = apply_file_meta(conn, &path, file_id, relative_path)?;
@@ -134,8 +139,9 @@ pub fn restore_file_version(
         )
         .map_err(|_| "版本不存在或已被清理")?;
     let path = content_file_path(conn, library_id, relative_path)?;
+    let bytes = encode_like_disk(&path, &content)?;
     snapshot_current(conn, library_id, relative_path, &path)?;
-    atomic_write(&path, content.as_bytes())?;
+    atomic_write(&path, &bytes)?;
     let (file_id, _): (i64, String) = conn
         .query_row(
             "SELECT id, format FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0",
@@ -250,7 +256,11 @@ fn snapshot_current(conn: &Connection, library_id: &str, relative_path: &str, pa
     if bytes.len() as u64 > MAX_EXTRACT_BYTES {
         return Ok(()); // 超大文本暂不快照
     }
-    let content = String::from_utf8_lossy(&bytes).to_string();
+    // 快照存解码后的文本；无法无损解码的文件不做快照（同时也不会被保存覆盖）
+    let content = match crate::textenc::decode(&bytes) {
+        Ok(d) => d.text,
+        Err(_) => return Ok(()),
+    };
     conn.execute(
         "INSERT INTO file_versions (library_id, relative_path, size, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![library_id, relative_path, bytes.len() as i64, content, now_millis()],
@@ -267,13 +277,30 @@ fn snapshot_current(conn: &Connection, library_id: &str, relative_path: &str, pa
     Ok(())
 }
 
+/// 依据磁盘现有文件的编码与换行符编码新内容；文件尚不存在时使用 UTF-8 + LF。
+fn encode_like_disk(path: &Path, content: &str) -> Result<Vec<u8>, String> {
+    let (encoding, crlf) = match std::fs::read(path) {
+        Ok(bytes) => {
+            let d = crate::textenc::decode(&bytes)?;
+            let crlf = crate::textenc::uses_crlf(&d.text);
+            (d.encoding, crlf)
+        }
+        Err(_) => (crate::textenc::Encoding::Utf8, false),
+    };
+    let text = crate::textenc::apply_line_ending(content, crlf);
+    crate::textenc::encode(&text, encoding)
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let tmp = path.with_file_name(format!(
-        "{}.markflow-{}",
+        "{}{}{}",
         path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        crate::selfwrite::TEMP_MARKER,
         uuid::Uuid::new_v4()
     ));
+    crate::selfwrite::mark(path);
+    crate::selfwrite::mark(&tmp);
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {e}"))?;
         f.write_all(bytes).map_err(|e| format!("写入临时文件失败: {e}"))?;
@@ -382,5 +409,41 @@ mod tests {
         // 目录不可编辑
         assert!(read_text_file(&conn, &lib_id, "docs").is_err());
         let _ = list_children(&conn, &lib_id, "docs").unwrap();
+    }
+
+    #[test]
+    fn gbk_file_survives_save_and_crlf_preserved() {
+        let (conn, dir, lib_id) = setup_library();
+        let rel = "docs/日志.txt";
+        let path = dir.path().join("docs").join("日志.txt");
+        let (gbk, _, _) = encoding_rs::GBK.encode("第一行\r\n第二行\r\n");
+        std::fs::write(&path, gbk.as_ref()).unwrap();
+        scan_library_with(&conn, &lib_id, dir.path(), &[], ScanOptions::default()).unwrap();
+
+        let read = read_text_file(&conn, &lib_id, rel).unwrap();
+        assert_eq!(read.encoding, "GBK");
+        assert!(read.content.contains("第二行"));
+        // 编辑器内部使用 LF；保存后按磁盘原风格写回 CRLF + GBK
+        save_text_file(&conn, &lib_id, rel, "第一行\n第二行\n第三行\n", read.base_mtime, false).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let (expect, _, _) = encoding_rs::GBK.encode("第一行\r\n第二行\r\n第三行\r\n");
+        assert_eq!(bytes, expect.as_ref());
+        // GBK 无法表示的字符 → 拒绝保存，磁盘内容不变
+        let base = read_text_file(&conn, &lib_id, rel).unwrap().base_mtime;
+        assert!(save_text_file(&conn, &lib_id, rel, "😀", base, false).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), expect.as_ref());
+    }
+
+    #[test]
+    fn history_follows_rename() {
+        let (conn, _dir, lib_id) = setup_library();
+        let rel = "docs/方案.md";
+        let base = read_text_file(&conn, &lib_id, rel).unwrap().base_mtime;
+        save_text_file(&conn, &lib_id, rel, "# 新版", base, false).unwrap();
+        assert_eq!(list_file_versions(&conn, &lib_id, rel).unwrap().len(), 1);
+
+        crate::library::migrate_path_refs(&conn, &lib_id, "docs", "文档").unwrap();
+        assert_eq!(list_file_versions(&conn, &lib_id, rel).unwrap().len(), 0);
+        assert_eq!(list_file_versions(&conn, &lib_id, "文档/方案.md").unwrap().len(), 1);
     }
 }

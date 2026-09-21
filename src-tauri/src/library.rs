@@ -290,10 +290,36 @@ pub fn open_library(conn: &Connection, id: &str) -> Result<LibraryMeta, String> 
 
 /// 仅从 MarkFlow 移除索引记录，绝不删除磁盘上的原文件。
 pub fn remove_library(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM search_fts WHERE file_id IN (SELECT id FROM files WHERE library_id = ?1)",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM files WHERE library_id = ?1", [id])
         .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM libraries WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 重命名 / 移动后迁移以相对路径为键的元数据（历史快照、批注），使其跟随文件。
+/// 目录会连带迁移其下所有子路径。
+pub fn migrate_path_refs(conn: &Connection, library_id: &str, old_rel: &str, new_rel: &str) -> Result<(), String> {
+    if old_rel == new_rel || old_rel.is_empty() {
+        return Ok(());
+    }
+    // 以 '!' 作为 LIKE 转义符，避免反斜杠转义歧义
+    let escaped = old_rel.replace('!', "!!").replace('%', "!%").replace('_', "!_");
+    let like = format!("{escaped}/%");
+    let old_len = old_rel.chars().count() as i64;
+    for table in ["file_versions", "annotations"] {
+        let sql = format!(
+            "UPDATE {table} SET relative_path = ?1 || substr(relative_path, ?2)
+             WHERE library_id = ?3 AND (relative_path = ?4 OR relative_path LIKE ?5 ESCAPE '!')"
+        );
+        conn.execute(&sql, params![new_rel, old_len + 1, library_id, old_rel, like])
+            .map_err(|e| format!("迁移元数据失败: {e}"))?;
+    }
     Ok(())
 }
 
@@ -448,17 +474,11 @@ fn collect_scan_rows(
     Ok((rows, skipped))
 }
 
-/// 提取单个文本文件的正文并写入提取表与 FTS（调用方负责事务）。
-fn extract_and_index(conn: &Connection, root: &Path, file_id: i64, row: &ScanRow) {
-    index_file_content(conn, &root.join(&row.relative_path), file_id, &row.name);
-}
-
-/// 按磁盘当前内容重建单个文件的提取记录与 FTS 行。
-/// 文本格式按 UTF-8 lossy 读取；Office 格式走 OOXML 安全解析（office.rs）。
-pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i64, name: &str) {
-    let _ = clear_extraction(conn, file_id);
+/// 计算单个文件的提取结果（不访问数据库，可在无锁状态下执行）。
+/// 文本格式按检测到的编码解码；Office 格式走 OOXML 安全解析（office.rs）。
+pub(crate) fn extract_for_index(file_path: &Path, name: &str) -> (String, Option<String>) {
     let format = detect_format(name);
-    let (status, text) = if matches!(format, "word" | "excel" | "powerpoint") {
+    if matches!(format, "word" | "excel" | "powerpoint") {
         match std::fs::metadata(file_path) {
             Ok(m) if m.len() <= crate::office::MAX_OFFICE_BYTES => {
                 match crate::office::extract_text(file_path, format) {
@@ -473,10 +493,13 @@ pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i
     } else {
         match std::fs::read(file_path) {
             Ok(bytes) if bytes.len() as u64 > MAX_EXTRACT_BYTES => ("too_large".to_string(), None),
-            Ok(bytes) => ("ok".to_string(), Some(String::from_utf8_lossy(&bytes).to_string())),
+            Ok(bytes) => ("ok".to_string(), Some(crate::textenc::decode_lossy_for_index(&bytes))),
             Err(_) => ("read_error".to_string(), None),
         }
-    };
+    }
+}
+
+fn store_extraction(conn: &Connection, file_id: i64, name: &str, status: &str, text: Option<String>) {
     let _ = conn.execute(
         "INSERT INTO extracted_content (file_id, extractor_version, status, text) VALUES (?1, 'v1', ?2, ?3)",
         params![file_id, status, text],
@@ -487,6 +510,13 @@ pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i
             params![file_id, name, body],
         );
     }
+}
+
+/// 按磁盘当前内容重建单个文件的提取记录与 FTS 行。
+pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i64, name: &str) {
+    let _ = clear_extraction(conn, file_id);
+    let (status, text) = extract_for_index(file_path, name);
+    store_extraction(conn, file_id, name, &status, text);
 }
 
 pub(crate) fn clear_extraction(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
@@ -503,47 +533,143 @@ pub(crate) fn now_millis() -> i64 {
     now_ms()
 }
 
-fn insert_rows(conn: &Connection, library_id: &str, root: &Path, rows: &[ScanRow]) -> Result<usize, String> {
+/// 库内已登记文件的快照，用于增量比对（未变化的文件不重复提取，保持文件 id 稳定）。
+pub struct ExistingRow {
+    id: i64,
+    size: i64,
+    mtime: i64,
+    format: String,
+}
+
+pub type ExistingMap = std::collections::HashMap<String, ExistingRow>;
+
+pub fn load_existing(conn: &Connection, library_id: &str) -> Result<ExistingMap, String> {
+    let mut stmt = conn
+        .prepare("SELECT relative_path, id, size, mtime, format FROM files WHERE library_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([library_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ExistingRow { id: row.get(1)?, size: row.get(2)?, mtime: row.get(3)?, format: row.get(4)? },
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<ExistingMap>>().map_err(|e| e.to_string())
+}
+
+fn is_unchanged(existing: &ExistingMap, row: &ScanRow) -> bool {
+    existing
+        .get(&row.relative_path)
+        .map(|ex| ex.size == row.size && ex.mtime == row.mtime && ex.format == row.format)
+        .unwrap_or(false)
+}
+
+/// 扫描准备阶段的产物：目录遍历结果 + 变更文件的提取结果（均不需要数据库锁）。
+pub struct Prepared {
+    root: PathBuf,
+    rows: Vec<ScanRow>,
+    skipped: usize,
+    extracted: std::collections::HashMap<usize, (String, Option<String>)>,
+}
+
+/// 阶段一（无锁）：遍历目录，仅对新增/变更的文本文件读取并提取正文。
+pub fn scan_prepare(
+    root: &Path,
+    exclude: &[String],
+    existing: &ExistingMap,
+    opts: &ScanOptions<'_>,
+) -> Result<Prepared, String> {
+    let (rows, skipped) = collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?;
+    let mut extracted = std::collections::HashMap::new();
+    for (i, row) in rows.iter().enumerate() {
+        if let Some(flag) = opts.cancel {
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(ERR_CANCELED.into());
+            }
+        }
+        if !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str()) && !is_unchanged(existing, row) {
+            extracted.insert(i, extract_for_index(&root.join(&row.relative_path), &row.name));
+        }
+    }
+    Ok(Prepared { root: root.to_path_buf(), rows, skipped, extracted })
+}
+
+/// 阶段二（持锁，仅数据库写入）：增量更新 files / 提取表 / FTS，单事务，失败可回滚。
+pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Result<ScanOutcome, String> {
+    let Prepared { root, rows, skipped, extracted } = prepared;
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("开启索引事务失败: {e}"))?;
-    // 先清旧 FTS（files 删除后 file_id 失联），再重建文件索引：全程单事务，失败可回滚
-    tx.execute(
-        "DELETE FROM search_fts WHERE file_id IN (SELECT id FROM files WHERE library_id = ?1)",
-        [library_id],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM files WHERE library_id = ?1", [library_id])
-        .map_err(|e| e.to_string())?;
-    let mut stmt = tx
-        .prepare(
-            "INSERT OR REPLACE INTO files
-             (library_id, relative_path, name, parent_path, is_dir, format, size, mtime)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        )
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        stmt.execute(params![
-            library_id,
-            row.relative_path,
-            row.name,
-            row.parent_path,
-            row.is_dir,
-            row.format,
-            row.size,
-            row.mtime,
-        ])
-        .map_err(|e| format!("写入索引失败: {e}"))?;
-        if !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str()) {
-            extract_and_index(&tx, root, tx.last_insert_rowid(), row);
+    let existing = load_existing(&tx, library_id)?;
+
+    // 已从磁盘消失的条目
+    let live: std::collections::HashSet<&str> = rows.iter().map(|r| r.relative_path.as_str()).collect();
+    for (path, ex) in &existing {
+        if !live.contains(path.as_str()) {
+            clear_extraction(&tx, ex.id).map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM files WHERE id = ?1", [ex.id]).map_err(|e| e.to_string())?;
         }
     }
-    drop(stmt);
+
+    for (i, row) in rows.iter().enumerate() {
+        let is_text = !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str());
+        match existing.get(&row.relative_path) {
+            Some(ex) => {
+                let unchanged = ex.size == row.size && ex.mtime == row.mtime && ex.format == row.format;
+                if unchanged && !extracted.contains_key(&i) {
+                    continue;
+                }
+                tx.execute(
+                    "UPDATE files SET name = ?1, parent_path = ?2, is_dir = ?3, format = ?4, size = ?5, mtime = ?6
+                     WHERE id = ?7",
+                    params![row.name, row.parent_path, row.is_dir, row.format, row.size, row.mtime, ex.id],
+                )
+                .map_err(|e| format!("更新索引失败: {e}"))?;
+                if is_text {
+                    clear_extraction(&tx, ex.id).map_err(|e| e.to_string())?;
+                    let (status, text) = extracted
+                        .get(&i)
+                        .cloned()
+                        .unwrap_or_else(|| extract_for_index(&root.join(&row.relative_path), &row.name));
+                    store_extraction(&tx, ex.id, &row.name, &status, text);
+                }
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO files (library_id, relative_path, name, parent_path, is_dir, format, size, mtime)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        library_id,
+                        row.relative_path,
+                        row.name,
+                        row.parent_path,
+                        row.is_dir,
+                        row.format,
+                        row.size,
+                        row.mtime
+                    ],
+                )
+                .map_err(|e| format!("写入索引失败: {e}"))?;
+                let id = tx.last_insert_rowid();
+                if is_text {
+                    let (status, text) = extracted
+                        .get(&i)
+                        .cloned()
+                        .unwrap_or_else(|| extract_for_index(&root.join(&row.relative_path), &row.name));
+                    store_extraction(&tx, id, &row.name, &status, text);
+                }
+            }
+        }
+    }
     tx.commit().map_err(|e| format!("提交索引事务失败: {e}"))?;
-    let file_count: i64 = rows.iter().filter(|r| !r.is_dir).count() as i64;
-    conn.execute("UPDATE libraries SET file_count = ?1 WHERE id = ?2", params![file_count, library_id])
-        .map_err(|e| e.to_string())?;
-    Ok(file_count as usize)
+    let file_count = rows.iter().filter(|r| !r.is_dir).count();
+    conn.execute(
+        "UPDATE libraries SET file_count = ?1 WHERE id = ?2",
+        params![file_count as i64, library_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(ScanOutcome { file_count, skipped })
 }
 
 /// 完整扫描结果：入库文件数与被跳过（被占用/无权限）的条目数。
@@ -564,11 +690,21 @@ pub struct ScanOptions<'a> {
     pub on_progress: Option<&'a dyn Fn(u64)>,
 }
 
-/// 完整扫描（可带取消与进度）：扫描 → 提取 → 重建该库索引。
+/// 完整扫描（单连接同步版，供测试与已持锁的调用方使用）：增量更新该库索引。
+#[cfg(test)]
 pub fn scan_library_with(conn: &Connection, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
-    let (rows, skipped) = collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?;
-    let file_count = insert_rows(conn, library_id, root, &rows)?;
-    Ok(ScanOutcome { file_count, skipped })
+    let existing = load_existing(conn, library_id)?;
+    let prepared = scan_prepare(root, exclude, &existing, &opts)?;
+    scan_apply(conn, library_id, prepared)
+}
+
+/// 完整扫描（不长期持锁版）：目录遍历与正文提取在无锁状态执行，仅写库时短暂持锁，
+/// 扫描期间其他命令（列目录、搜索、保存）不被阻塞。
+pub fn scan_library_locked(state: &AppState, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
+    let existing = load_existing(&state.0.lock().unwrap(), library_id)?;
+    let prepared = scan_prepare(root, exclude, &existing, &opts)?;
+    let conn = state.0.lock().unwrap();
+    scan_apply(&conn, library_id, prepared)
 }
 
 /// 完整扫描（后台线程版，纳入任务中心）：扫描 → 提取 → 重建索引，
@@ -592,8 +728,8 @@ pub fn spawn_full_scan(
         let progress = |processed: u64| {
             mgr_for_progress.progress(&task_id, processed);
         };
-        let result = scan_library_with(
-            &state.0.lock().unwrap(),
+        let result = scan_library_locked(
+            &state,
             &library_id,
             &root,
             &exclude,

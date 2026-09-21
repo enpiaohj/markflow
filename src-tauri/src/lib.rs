@@ -10,8 +10,10 @@ mod fsops;
 mod library;
 mod ocr;
 mod office;
+mod selfwrite;
 mod sensitive;
 mod tasks;
+mod textenc;
 mod watch;
 
 use library::{AppState, CreateLibraryRequest};
@@ -442,17 +444,40 @@ async fn ai_chat(
     channel: tauri::ipc::Channel<String>,
     request: ai::AiChatRequest,
 ) -> Result<ai::ChatOutcome, String> {
-    let (root, provider, key) = {
+    let (root, providers) = {
         let conn = state.0.lock().unwrap();
-        let provider = ai::read_providers(&conn)
-            .into_iter()
+        let all = ai::read_providers(&conn);
+        let primary = all
+            .iter()
             .find(|p| p.id == request.provider_id)
+            .cloned()
             .ok_or("Provider 不存在")?;
-        let key = ai::provider_key(&provider.id)?;
+        let mut providers = vec![(primary.clone(), ai::provider_key(&primary.id)?)];
+        if let Some(fid) = request.fallback_provider_id.as_deref().filter(|f| *f != primary.id) {
+            if let Some(fallback) = all.iter().find(|p| p.id == fid).cloned() {
+                providers.push((fallback.clone(), ai::provider_key(&fallback.id)?));
+            }
+        }
         let root = library::get_library(&conn, &request.library_id)?.root_path;
-        (root, provider, key)
+        (root, providers)
     };
-    ai::chat(&root, provider, key, channel, request).await
+    ai::chat(&root, providers, channel, request).await
+}
+
+/// 取消正在进行的 AI 对话。
+#[tauri::command]
+fn ai_cancel() {
+    ai::CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 更新 Provider（API Key 留空表示不修改）。
+#[tauri::command]
+fn ai_update_provider(
+    state: State<'_, AppState>,
+    id: String,
+    request: ai::ProviderSaveRequest,
+) -> Result<ai::ProviderConfig, String> {
+    ai::update_provider(&state.0.lock().unwrap(), &id, request)
 }
 
 /// 文档质量检查（Markdown：标题层级 / 断链 / 空章节 / 敏感信息）。
@@ -464,7 +489,7 @@ fn check_document(
 ) -> Result<Vec<checks::Issue>, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
-    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let content = textenc::decode_lossy_for_index(&std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?);
     let document_dir = path
         .parent()
         .map(|p| p.to_path_buf())
@@ -740,6 +765,7 @@ fn rename_library_entry(
 ) -> Result<String, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let new_rel = fsops::rename_entry(&root, &relative_path, &new_name)?;
+    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -756,6 +782,7 @@ fn move_library_entry(
 ) -> Result<String, String> {
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let new_rel = fsops::move_entry(&root, &relative_path, &target_dir)?;
+    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -931,6 +958,8 @@ pub fn run() {
             ai_test_provider,
             ai_prepare_context,
             ai_chat,
+            ai_cancel,
+            ai_update_provider,
             check_document,
             create_text_file,
             list_library_files,
