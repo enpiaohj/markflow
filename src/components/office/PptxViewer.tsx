@@ -131,7 +131,7 @@ export default function PptxViewer({
       }}
     >
       {/* 缩略图导航 */}
-      <div className="w-[188px] shrink-0 overflow-y-auto border-r border-gray-200 bg-white/70 p-2">
+      <div className="w-[188px] shrink-0 overflow-y-auto overflow-x-hidden border-r border-gray-200 bg-white/70 p-2">
         {Array.from({ length: count }, (_, k) => k + 1).map((i) => (
           <button
             key={i}
@@ -141,10 +141,10 @@ export default function PptxViewer({
           >
             <span className="w-4 shrink-0 pt-0.5 text-right text-[10px] text-gray-500">{i}</span>
             {urls[i] ? (
-              <img src={urls[i]} alt={`第 ${i} 页`} className="w-full rounded-sm bg-white shadow-sm ring-1 ring-gray-200" draggable={false} />
+              <img src={urls[i]} alt={`第 ${i} 页`} className="min-w-0 flex-1 rounded-sm bg-white shadow-sm ring-1 ring-gray-200" draggable={false} />
             ) : (
               <span
-                className="flex w-full items-center justify-center rounded-sm bg-white px-1 text-center text-[10px] leading-tight text-gray-400 shadow-sm ring-1 ring-gray-200"
+                className="flex min-w-0 flex-1 items-center justify-center rounded-sm bg-white px-1 text-center text-[10px] leading-tight text-gray-400 shadow-sm ring-1 ring-gray-200"
                 style={{ aspectRatio: progress ? `${progress.width} / ${progress.height}` : "16 / 9" }}
               >
                 {i <= ready ? <Loader2 className="h-3 w-3 animate-spin" /> : (titles[i - 1] ?? "").slice(0, 28) || "…"}

@@ -187,7 +187,11 @@ export default function OfficePreviewPane() {
         <FileSpreadsheet className="h-4 w-4 shrink-0 text-gray-400" />
         <span className="min-w-0 truncate text-[13px] font-medium text-gray-800">{rel}</span>
         <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500">
-          {officeKind(rel) === "excel" ? "原生表格" : "文本快速预览"}
+          {officeKind(rel) === "excel"
+            ? "原生表格"
+            : officeKind(rel) === "powerpoint" && engine === "office" && !viewerFile.preferText && !pptxText
+              ? "幻灯片"
+              : "文本快速预览"}
         </span>
         <div className="ml-auto flex items-center gap-2">
           {preview?.kind === "docx" && (

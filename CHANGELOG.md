@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Office 阅读体验重做，按格式选择最合适的默认方式：**
+  - **Word：** 打开先显示目录（由标题样式 / 大纲级别提取）与文字，同时后台用 Microsoft Office 生成精确版式，
+    完成后自动切换为连续阅读；可随时取消；选中文件时后台预热缓存，二次打开秒开。
+  - **Excel：** 默认使用原生表格视图，不再转 PDF——列宽 / 行高、合并单元格、冻结窗格、字体 / 颜色 / 填充 / 边框 / 对齐、
+    日期 / 百分比 / 千分位 / 货币等数字格式与 Excel 一致，底部为工作表标签；另提供单独的「打印版式预览」（导出前按页宽缩放）。
+  - **PowerPoint：** 逐页图片查看器（缩略图导航 + 单页大图），导出一页显示一页，方向键翻页；
+    只装了 LibreOffice 时回退为 PDF 版式预览，都没有时为文本大纲。
+- **PDF 查看器重写为连续滚动：** 页面虚拟化（只渲染视口附近，远离即释放，长文档不占内存）、可选中并复制文字、
+  搜索结果在页面上高亮、缩略图导航、页码输入框、自适应宽度 + 缩放。库内 PDF 与 Office 版式预览共用。
+- 外部程序（Word / Excel / PowerPoint / PDF 工具）保存文件后回到 MarkFlow 窗口，预览自动刷新。
+- Office 导出串行执行（PDF 与幻灯片共用一把锁），避免多个 Office 实例互相抢占。
+
+### Fixed
+
+- 用户在版式预览生成期间离开后，结果返回时仍会重新弹出查看器。
+
 ## [0.4.2] - 2026-09-21
 
 ### Changed
