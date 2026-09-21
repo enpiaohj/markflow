@@ -4,6 +4,12 @@
   <img src="public/markflow.svg" alt="MarkFlow" width="72" />
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue" /></a>
+  <a href="https://github.com/enpiaohj/markflow/releases"><img alt="Release" src="https://img.shields.io/github/v/release/enpiaohj/markflow" /></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-informational" />
+</p>
+
 面向项目与企业文档的**多格式本地文档库、专业写作、AI 协作和正式交付工作台**。
 
 以普通本地文件夹为基础，统一管理 Markdown、Word、PDF、Excel、PPT、图片、代码、配置等格式，
@@ -16,6 +22,10 @@
 ## 功能特性
 
 ### 📁 多格式文档库
+
+- **多个文档库**：左侧顶部的文档库选择器（下拉，按名称排序）切换库；也可在「设置 → 外观」改为并列多库（各库可折叠，折叠状态持久化）。库名是区分库的唯一标识，建库时必填且不可重名。「管理文档库」在侧边栏内完成打开 / 关闭 / 移除；移除后重新添加同一文件夹，历史版本与批注自动恢复。
+- **文档标签页**：打开的文档保留为标题栏里的标签页，切换视图或返回文档库都不会丢，未保存的编辑与滚动位置也保留，只有手动关闭才结束。
+- **默认定位**：打开文档库自动定位到第一项，左侧树与中央列表结构不同、一目了然。
 
 - **建库向导**：三步完成——选择本地文件夹 → 索引设置（全文索引 / 图片 OCR / 便携元数据 / 排除规则）→ 确认创建；第一步即预览文件数量与总大小。
 - **格式注册表**：Markdown、文本、代码、JSON、YAML、XML、配置、CSV、Word、Excel、PowerPoint、PDF、图片、压缩包、音视频等 17 类格式识别与图标区分；未知格式自动归入「其他」，不阻断使用。
@@ -40,8 +50,9 @@
 
 ### 📄 PDF 与 Office
 
-- **PDF 阅读**（PDF.js）：翻页、缩放（40%–400%）、跨页文本搜索（命中页码点击定位）。
-- **Office 快速预览**：DOCX 段落流 / XLSX 工作表网格 / PPTX 幻灯片大纲；OOXML 纯解析（不执行宏、不改源文件）；正文进入全文索引。
+- **PDF 阅读**（PDF.js）：连续滚动、缩放（40%–400%）、可选中文本、跨页文本搜索（命中页码点击定位）。
+- **Word / PowerPoint 内置渲染（默认）**：即时显示，Word 带按标题样式 / 大纲级别提取的导航窗格；无需安装 Office、也不会启动 Office。也可在文档工具栏或「设置 → 预览」切到「自动」，有 Microsoft Office / LibreOffice 时使用其导出的精确版式。
+- **Excel 原生表格**：Excel 风格网格（字体 / 填充 / 边框 / 数字格式 / 合并 / 冻结窗格）与**按值筛选**，OOXML 纯解析（不执行宏、不改源文件）。
 - **系统应用打开**：一键调用 Word / Excel / WPS 编辑原件，保存后由文件监听自动同步。
 - **转换**：DOCX → Markdown 可编辑副本（Pandoc，转换前预检加密 / 宏 / 修订 / 批注）；DOCX / HTML 导入转 Markdown。
 - 可选 LibreOffice 组件提供高保真版式预览（未安装时自动降级）。
@@ -67,6 +78,13 @@
 - **来源冻结**：交付前对全部来源计算 SHA-256，交付清单记录冻结哈希与知情放行的预检提示。
 - **可靠落盘**：临时目录生成 → 产物验证（存在 / 非空 / DOCX 有效性）→ 同卷原子改名；失败自动清理。
 
+### ⚙️ 设置与外壳
+
+- **设置页**：左侧分类（通用 / 外观 / 编辑器 / 预览 / AI / 组件 / 关于）+ 右侧内容，可搜索，改动立即生效。
+- **主题**：浅色 / 深色 / 跟随系统；Word / Excel / PPT / PDF 的文档页面始终保持白纸底色。
+- **开机启动**（当前用户 `Run` 项，无需管理员权限）与**关闭窗口时最小化到通知区域**。
+- **打开任意文件**：菜单 / 拖放 / 文件关联打开任意文件（库外文件进入「单文件模式」）；`.md` 可设为默认打开方式。
+
 ### 🧰 后台任务中心
 
 索引、重扫、转换、导入、交付任务统一管理：实时进度、取消、完成摘要、失败原因与重试入口；状态栏显示运行中任务数。
@@ -75,7 +93,7 @@
 
 ## 当前版本与路线图
 
-**当前版本：v0.3.1**（详见 [CHANGELOG](CHANGELOG.md)）
+**当前版本：v0.6.0**（详见 [CHANGELOG](CHANGELOG.md)）
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
@@ -84,6 +102,7 @@
 | v0.3 PDF/Office 与转换 | 阅读器 / 快速预览 / Pandoc 转换 | ✅ |
 | v0.4 AI 与审阅 | AI 工作台 / OCR / 批注 / 质量检查 | ✅（OCR 置信度随 SDK 缺失） |
 | v0.5 正式交付 | 交付中心 / 门禁 / 历史 | ✅ |
+| v0.6 体验迭代与开源 | 多文档库 / 文档标签页 / Office 阅读体验 / 设置与主题 / 转公开（GPL-3.0） | ✅ |
 
 后续规划：扫描版 PDF 页面级 OCR、PDF 批注、Markdown 链接自动改写、代码签名与自动更新、文档关系图、团队协作。
 
@@ -106,17 +125,17 @@
 
 ### 方式三：从源码构建
 
-见《[开发指南](docs/2026-09-21-MarkFlow开发指南-v1.1.md)》。
+见《[开发指南](docs/2026-09-22-MarkFlow开发指南-v1.2.md)》。
 
 ## 快速上手（5 分钟）
 
-1. **建库**：启动后点击「创建文档库」→ 选择一个本地文件夹（例如项目文档目录）→ 保持默认索引设置 → 创建。文件不会被移动或修改。
-2. **浏览**：左侧目录树双击展开；中央列表可按名称 / 修改时间 / 大小排序；右侧查看文件详情。
+1. **建库**：启动后点击「创建文档库」→ 选择一个本地文件夹（例如项目文档目录）→ 保持默认索引设置 → 给文档库起一个名称（必填、不可重名）→ 创建。文件不会被移动或修改。
+2. **浏览**：左侧顶部选择文档库，目录树双击展开；中央列表可按名称 / 修改时间 / 大小排序；右侧查看文件详情。双击打开的文档以标签页保留在标题栏。
 3. **搜索**：`Ctrl + K` 输入关键词（如「负载均衡」），命中片段高亮，点击结果直接跳到所在位置。
 4. **编辑**：双击 Markdown 文件进入可视化编辑，`Ctrl + S` 保存；用其他程序改动文件后 MarkFlow 会自动同步。
 5. **AI（可选）**：设置 → AI 中添加 Provider 与 API Key → 编辑器右上「AI 助手」基于当前文档问答或润色。
 
-更多细节见《[使用指南](docs/2026-09-21-MarkFlow使用指南-v1.1.md)》。
+更多细节见《[使用指南](docs/2026-09-22-MarkFlow使用指南-v1.2.md)》。
 
 ## 项目结构
 
@@ -128,6 +147,7 @@ MarkFlow/
 │  ├─ components/                 # 标题栏 / 活动栏 / 状态栏 / 向导 / 编辑器 /
 │  │                              # 查看器 / AI 面板 / 批注面板 / 各 Context
 │  ├─ views/                      # 开始 / 文档库 / 搜索 / 任务 / 历史 / 设置
+│  ├─ components/office/          # Excel 网格 / Word・PPT 内置渲染 / 引擎切换
 │  ├─ lib/                        # 后端 API 封装、类型、格式映射
 │  ├─ navigation.ts               # 一级导航模型
 │  └─ index.css                   # Tailwind 与设计令牌
@@ -138,6 +158,10 @@ MarkFlow/
 │  │  ├─ editor.rs                # 读取 / 原子保存 / 冲突 / 快照恢复
 │  │  ├─ ocr.rs                   # Windows OCR
 │  │  ├─ office.rs                # DOCX/XLSX/PPTX OOXML 提取与预览
+│  │  ├─ xlsxview.rs              # XLSX 原生表格（样式 / 数字格式 / 合并 / 冻结）
+│  │  ├─ officepdf.rs / pptxslides.rs  # Office 版式预览（COM → PDF / 幻灯片图片）
+│  │  ├─ openfile.rs / textenc.rs # 打开任意文件（单文件模式）/ 文本编码检测与写回
+│  │  ├─ shell.rs                 # 通知区域图标 / 开机启动 / 关闭时最小化
 │  │  ├─ convert.rs               # Pandoc 转换 / LibreOffice 转 PDF
 │  │  ├─ component_manager.rs     # 可选组件探测与健康状态
 │  │  ├─ delivery.rs              # 正式交付中心
@@ -148,6 +172,8 @@ MarkFlow/
 │  │  └─ ai.rs                    # AI Provider / 上下文门禁 / 流式对话
 │  ├─ capabilities/               # Tauri 能力权限（最小授权）
 │  └─ tauri.conf.json             # 应用与窗口配置
+├─ scripts/                       # 工具脚本（第三方声明生成等）
+├─ LICENSE / THIRD-PARTY-NOTICES.md / SECURITY.md
 └─ index.html / vite.config.ts / package.json
 ```
 
@@ -168,7 +194,7 @@ npm run tauri build    # 完整发布构建（NSIS 安装包）
 cargo test             # Rust 单元 / 集成测试（src-tauri 下）
 ```
 
-测试策略、模块职责、发布流程与常见开发问题详见《[开发指南](docs/2026-09-21-MarkFlow开发指南-v1.1.md)》。
+测试策略、模块职责、发布流程与常见开发问题详见《[开发指南](docs/2026-09-22-MarkFlow开发指南-v1.2.md)》。
 
 ## 故障排查（FAQ）
 
@@ -187,11 +213,21 @@ cargo test             # Rust 单元 / 集成测试（src-tauri 下）
 |---|---|
 | 产品设计与技术实施方案 v2.0（不入库，存放于 ai-coding-workspace） | 产品定位、功能闭环、技术架构、路线图 |
 | UI 概念设计图（不入库，存放于 ai-coding-workspace） | 10 张核心界面概念稿 |
-| [使用指南 v1.1](docs/2026-09-21-MarkFlow使用指南-v1.1.md) | 分功能操作手册与常见问题 |
-| [开发指南 v1.1](docs/2026-09-21-MarkFlow开发指南-v1.1.md) | 环境搭建、架构、测试、发布流程 |
+| [使用指南 v1.2](docs/2026-09-22-MarkFlow使用指南-v1.2.md) | 分功能操作手册与常见问题 |
+| [开发指南 v1.2](docs/2026-09-22-MarkFlow开发指南-v1.2.md) | 环境搭建、架构、测试、发布流程、许可与合规 |
+| [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md) | 第三方组件许可声明 |
+| [SECURITY](SECURITY.md) | 安全策略与漏洞报告方式 |
 | [CHANGELOG](CHANGELOG.md) | 版本变更记录 |
 | [AGENTS.md](AGENTS.md) | 项目规则（Repository Rule） |
 
 ## 许可
 
-未定。当前为私有项目（All Rights Reserved），如需开源须先完成许可证与第三方授权检查。
+MarkFlow 以 **[GPL-3.0-only](LICENSE)** 发布：可以自由使用、学习、修改与再分发；再分发（含修改版）须同样以 GPL-3.0 提供对应源码。
+
+所使用的第三方组件及其许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，均与 GPL-3.0 兼容。Pandoc / LibreOffice / Microsoft Edge 等外部工具不随应用分发，仅在本机已安装时以独立进程调用。
+
+## 参与与反馈
+
+- 问题与建议：[Issues](https://github.com/enpiaohj/markflow/issues)
+- 安全漏洞：请按 [SECURITY.md](SECURITY.md) 私密报告，不要公开披露
+- 贡献代码：Fork → 分支（`feature/<name>` / `fix/<name>`）→ Conventional Commits → 提交 Pull Request；提交内容将按 GPL-3.0 许可

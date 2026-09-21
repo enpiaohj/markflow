@@ -490,11 +490,11 @@ export default function SettingsView() {
               <ExternalLink href="https://github.com/enpiaohj/markflow">https://github.com/enpiaohj/markflow</ExternalLink>
             </AboutRow>
             <AboutRow label="许可证">
-              <span className="text-gray-800">私有项目 · 保留所有权利（暂未开源）</span>
+              <span className="text-gray-800">GPL-3.0-only</span>
             </AboutRow>
           </dl>
           <p className="mt-3 text-xs leading-relaxed text-gray-400">
-            Word / PowerPoint 内置渲染使用 Apache-2.0 许可的第三方组件（docx-preview、pptx-renderer），PDF 阅读使用 PDF.js。
+            本应用按 GPL-3.0 许可证发布：随源码分发的第三方组件清单见仓库 THIRD-PARTY-NOTICES.md（Word / PowerPoint 内置渲染使用 Apache-2.0 许可的 docx-preview 与 pptx-renderer，PDF 阅读使用 PDF.js）。
           </p>
           <div className="my-6 h-px bg-gray-200" />
           <h3 className="text-sm font-semibold text-gray-900">隐私与数据</h3>

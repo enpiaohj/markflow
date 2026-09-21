@@ -4,7 +4,8 @@
 
 - Product Name：MarkFlow
 - Repository：markflow
-- Visibility：Private
+- Visibility：Public（自 v0.6.0 起公开；此前为 Private）
+- License：GPL-3.0-only（`LICENSE`；第三方声明见 `THIRD-PARTY-NOTICES.md`）
 - Default Branch：main
 - Version：Semantic Versioning
 - Tag：vMAJOR.MINOR.PATCH
@@ -58,12 +59,13 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 ## 文档索引
 
 - 产品设计：不入库，统一存放于 ai-coding-workspace 的 MarkFlow 项目目录
-- 使用指南：`docs/2026-09-21-MarkFlow使用指南-v1.1.md`
-- 开发指南（环境 / 模块职责 / 测试 / 发布流程）：`docs/2026-09-21-MarkFlow开发指南-v1.1.md`
+- 使用指南：`docs/2026-09-22-MarkFlow使用指南-v1.2.md`
+- 开发指南（环境 / 模块职责 / 测试 / 发布流程 / 许可与合规）：`docs/2026-09-22-MarkFlow开发指南-v1.2.md`
 - 变更记录：`CHANGELOG.md`
 
 ## 版本与发布
 
-- P0 路线：v0.1 文档库基础 → v0.2 原生编辑与搜索 → v0.3 PDF/Office 与转换 → v0.4 AI 与审阅 → v0.5 正式交付。
+- P0 路线：v0.1 文档库基础 → v0.2 原生编辑与搜索 → v0.3 PDF/Office 与转换 → v0.4 AI 与审阅 → v0.5 正式交付；v0.6 起为体验迭代（多文档库、标签页、设置与主题、Office 阅读体验）并转公开。
+- **公开仓库红线**：产品设计文档 / UI 概念图 / 任何密钥与个人信息不得入库（含 `releases/*/source` 快照）；提交邮箱用 GitHub noreply；依赖许可须与 GPL-3.0 兼容。
 - 正式发布前先跑设计文档第 17 节的技术验证 Spike；Spike 未通过时调整能力声明，不得用 UI 掩盖技术限制。
 - 发布产物命名 `MarkFlow-v<版本>-win-x64.<ext>`；本地 `releases/` 目录已被 .gitignore 排除。

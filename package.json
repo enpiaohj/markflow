@@ -1,7 +1,11 @@
 {
   "name": "markflow",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
+  "description": "MarkFlow - 多格式本地文档库桌面应用",
+  "license": "GPL-3.0-only",
+  "author": "enpiaohj",
+  "repository": { "type": "git", "url": "git+https://github.com/enpiaohj/markflow.git" },
   "type": "module",
   "scripts": {
     "dev": "vite",
