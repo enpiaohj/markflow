@@ -43,6 +43,14 @@ export default function StatusBar() {
   return (
     <footer className="flex h-6 shrink-0 items-center justify-between border-t border-gray-200 bg-white px-3 text-xs text-gray-500">
       <div className="flex items-center gap-3">
+        {current && (
+          <>
+            <span className="max-w-[220px] truncate font-medium text-gray-600" title={current.rootPath}>
+              {current.settings?.adhoc ? `单文件 · ${current.name}` : current.name}
+            </span>
+            <span aria-hidden="true">|</span>
+          </>
+        )}
         {scanNode}
         <span aria-hidden="true">|</span>
         <span>本地优先 · 文件保存在原位置</span>

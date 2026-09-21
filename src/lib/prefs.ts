@@ -44,3 +44,41 @@ export function setOfficeEngine(pref: OfficeEnginePref): void {
     /* 存储不可用时忽略 */
   }
 }
+
+const THEME_KEY = "mf-pref-theme";
+
+/** 主题：light 浅色（默认）/ dark 深色 / system 跟随系统 */
+export type ThemePref = "light" | "dark" | "system";
+
+export function getTheme(): ThemePref {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return v === "dark" || v === "system" ? v : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** 按偏好给 <html> 加 / 去 dark 类（深色主题通过重映射颜色变量实现，见 index.css） */
+export function applyTheme(): void {
+  const pref = getTheme();
+  const dark = pref === "dark" || (pref === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+export function setTheme(pref: ThemePref): void {
+  try {
+    localStorage.setItem(THEME_KEY, pref);
+  } catch {
+    /* 存储不可用时仍在本次会话生效 */
+  }
+  applyTheme();
+}
+
+/** 启动时调用：应用主题，并在「跟随系统」下响应系统主题切换 */
+export function initTheme(): void {
+  applyTheme();
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (getTheme() === "system") applyTheme();
+  });
+}

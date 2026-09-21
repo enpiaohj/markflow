@@ -187,7 +187,7 @@ export default function PptxWebViewer({
               <p className="mt-3 text-sm">正在渲染演示文稿…</p>
             </div>
           )}
-          <div ref={hostRef} />
+          <div ref={hostRef} className="mf-pptx-host" />
         </div>
         <div className="flex h-8 shrink-0 items-center justify-center gap-3 border-t border-gray-200 bg-white text-xs text-gray-500">
           <span className="tabular-nums">{count ? `${index + 1} / ${count}` : "—"}</span>

@@ -346,7 +346,7 @@ function SheetGrid({ sheet, styles }: { sheet: XSheet; styles: XStyle[] }) {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-white">
+      <div className="mf-light min-h-0 flex-1 overflow-auto bg-white">
         <table style={{ borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", width: totalW }} className="bg-white text-[13px]">
           <colgroup>
             <col style={{ width: ROW_HEADER_W }} />
