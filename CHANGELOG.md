@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-22
+
 ### Fixed
 
 - **中央文件列表此前没有右键菜单**：「复制路径」及整个右键菜单（重命名 / 移动 / 删除等）此前只接在
