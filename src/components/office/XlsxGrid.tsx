@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Filter, Loader2, Search, TriangleAlert, X } from "lucide-react";
 import * as api from "../../lib/api";
 import type { XCell, XlsxView, XSheet, XStyle } from "../../lib/types";
+import { friendlyOfficeError } from "./safeLinks";
 
 const ROW_HEADER_W = 46;
 const HEADER_H = 24;
@@ -476,7 +477,7 @@ export default function XlsxGrid({ libraryId, relativePath, reloadKey }: { libra
         if (!cancelled) setView(v);
       })
       .catch((e) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(friendlyOfficeError(String(e)));
       });
     return () => {
       cancelled = true;

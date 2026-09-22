@@ -130,9 +130,59 @@ pub fn load(path: &Path) -> Result<XlsxView, String> {
         let Some(target) = targets.get(&rid) else { continue };
         let entry = if let Some(t) = target.strip_prefix('/') { t.to_string() } else { format!("xl/{target}") };
         let Some(xml) = read(&mut zip, &entry) else { continue };
-        sheets.push(parse_sheet(&xml, &name, &shared, &xf_formats, date1904)?);
+        let table_filter = read_table_auto_filter(&mut zip, &entry);
+        sheets.push(parse_sheet(&xml, &name, &shared, &xf_formats, date1904, table_filter)?);
     }
     Ok(XlsxView { sheets, styles })
+}
+
+/// 工作表本身没有 `<autoFilter>` 时的兜底：用 Excel「套用表格格式」（表格 / ListObject）插入的表格
+/// 会把筛选范围记在 `xl/tables/tableN.xml` 里，而不是工作表根节点上——按工作表的关系文件
+/// （`xl/worksheets/_rels/sheetN.xml.rels`）找到引用的表格定义并取其 `autoFilter`（或表格自身 `ref`）。
+/// 一个工作表里有多张独立表格时只取第一张（当前只支持单一筛选范围）。
+fn read_table_auto_filter(zip: &mut zip::ZipArchive<std::fs::File>, sheet_entry: &str) -> Option<[u32; 4]> {
+    let (dir, file) = sheet_entry.rsplit_once('/')?;
+    let rels_xml = read(zip, &format!("{dir}/_rels/{file}.rels"))?;
+    let rd = Document::parse(&rels_xml).ok()?;
+    for rel in rd.descendants().filter(|n| n.tag_name().name() == "Relationship") {
+        if !rel.attribute("Type").unwrap_or("").ends_with("/table") {
+            continue;
+        }
+        let Some(target) = rel.attribute("Target") else { continue };
+        let table_xml = read(zip, &resolve_relative(dir, target))?;
+        let td = Document::parse(&table_xml).ok()?;
+        let root = td.root_element();
+        let r = root
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "autoFilter")
+            .and_then(|n| n.attribute("ref"))
+            .or_else(|| root.attribute("ref"))?;
+        let (a, b) = r.split_once(':').unwrap_or((r, r));
+        let (r1, c1) = col_index(a);
+        let (r2, c2) = col_index(b);
+        if (r1 as usize) < MAX_ROWS && (c1 as usize) < MAX_COLS {
+            return Some([r1, c1, r2.min(MAX_ROWS as u32 - 1), c2.min(MAX_COLS as u32 - 1)]);
+        }
+    }
+    None
+}
+
+/// 按 ZIP 内路径解析相对引用（rels 里的 `Target` 常见为 `../tables/table1.xml` 这类相对路径）。
+fn resolve_relative(base_dir: &str, target: &str) -> String {
+    if let Some(t) = target.strip_prefix('/') {
+        return t.to_string();
+    }
+    let mut parts: Vec<&str> = base_dir.split('/').collect();
+    for seg in target.split('/') {
+        match seg {
+            ".." => {
+                parts.pop();
+            }
+            "." | "" => {}
+            _ => parts.push(seg),
+        }
+    }
+    parts.join("/")
 }
 
 fn read(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
@@ -408,7 +458,14 @@ fn col_index(cell_ref: &str) -> (u32, u32) {
     (row.saturating_sub(1), col.saturating_sub(1))
 }
 
-fn parse_sheet(xml: &str, name: &str, shared: &[String], xf_formats: &[String], date1904: bool) -> Result<XSheet, String> {
+fn parse_sheet(
+    xml: &str,
+    name: &str,
+    shared: &[String],
+    xf_formats: &[String],
+    date1904: bool,
+    table_auto_filter: Option<[u32; 4]>,
+) -> Result<XSheet, String> {
     let doc = Document::parse(xml).map_err(|e| format!("工作表 {name} 解析失败: {e}"))?;
     let mut sheet = XSheet { name: name.to_string(), show_grid: true, ..Default::default() };
 
@@ -470,6 +527,10 @@ fn parse_sheet(xml: &str, name: &str, shared: &[String], xf_formats: &[String], 
         if (r1 as usize) < MAX_ROWS && (c1 as usize) < MAX_COLS {
             sheet.auto_filter = Some([r1, c1, r2.min(MAX_ROWS as u32 - 1), c2.min(MAX_COLS as u32 - 1)]);
         }
+    }
+    // 工作表根节点没有自己的筛选范围时，回退到「套用表格格式」的表格筛选范围（见 read_table_auto_filter）。
+    if sheet.auto_filter.is_none() {
+        sheet.auto_filter = table_auto_filter;
     }
 
     let mut max_col = 0u32;
@@ -1021,5 +1082,43 @@ mod tests {
         assert_eq!(st.align.as_deref(), Some("center"));
         assert!(st.wrap);
         assert_eq!(st.border, 1 | 4);
+    }
+
+    /// Excel「套用表格格式」（插入表格 / ListObject）生成的工作簿：筛选范围只记在 `xl/tables/table1.xml`
+    /// 里，工作表根节点没有自己的 `<autoFilter>`——此前会导致筛选功能形同消失（默认关闭且无法通过
+    /// 「文件包含自动筛选范围」自动开启），修复后应从表格定义里取到同一个范围。
+    #[test]
+    fn auto_filter_falls_back_to_table_definition_when_worksheet_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("整改建议.xlsx");
+        let file = std::fs::File::create(&p).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let entries: Vec<(&str, &str)> = vec![
+            ("xl/workbook.xml", r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#),
+            ("xl/_rels/workbook.xml.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>"#),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData>
+                  <x:row r="6"><x:c r="A6" t="str"><x:v>标题</x:v></x:c></x:row>
+                  <x:row r="7"><x:c r="A7" t="str"><x:v>数据</x:v></x:c></x:row>
+                </x:sheetData><x:tableParts count="1"><x:tablePart r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></x:tableParts></x:worksheet>"#,
+            ),
+            (
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/tables/table1.xml",
+                r#"<x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="表1" ref="A6:A7" headerRowCount="1"><x:autoFilter ref="A6:A7"/></x:table>"#,
+            ),
+        ];
+        for (n, c) in entries {
+            zip.start_file(n, SimpleFileOptions::default()).unwrap();
+            zip.write_all(c.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+
+        let v = load(&p).unwrap();
+        assert_eq!(v.sheets[0].auto_filter, Some([5, 0, 6, 0]), "取自 xl/tables/table1.xml 的 A6:A7");
     }
 }
