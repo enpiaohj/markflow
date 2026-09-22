@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **旧版 .xls / OpenDocument .ods 打开时自动改用版式预览**：装有 Microsoft Office / LibreOffice 时
   双击这类文件会自动在后台生成版式预览并直接显示（与 Word 的行为一致），不再停留在文字提示；
-  没有可用引擎时维持原可读提示。.ods 此前还会报「缺少 xl/workbook.xml」内部错误，已改为可读提示
-  并补充回归测试。
+  生成期间显示专用加载占位，不再闪现「旧版 .xls」提示，版式预览失败后才回退到可读提示。
+  .ods 此前还会报「缺少 xl/workbook.xml」内部错误，已改为可读提示并补充回归测试。
 
 ## [0.9.0] - 2026-09-22
 

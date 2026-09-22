@@ -210,9 +210,11 @@ export default function OfficePreviewPane() {
 
   // ---- 显示模式：按格式、可用引擎与失败回退决定 ----
   const kind = officeKind(rel);
-  type Mode = "xlsx" | "docx-web" | "pptx-images" | "pptx-web" | "text" | "detecting";
+  type Mode = "xlsx" | "legacy-wait" | "docx-web" | "pptx-images" | "pptx-web" | "text" | "detecting";
   let mode: Mode;
-  if (kind === "excel") mode = "xlsx";
+  // 旧版 .xls / .ods 有可用引擎时走自动版式预览：不再渲染必然报错的内置表格视图（避免错误提示闪现），
+  // 版式预览失败后回退到内置表格视图的可读提示
+  if (kind === "excel") mode = legacyExcel && engine && !hifiError ? "legacy-wait" : "xlsx";
   else if ((kind === "word" || kind === "powerpoint") && engine === null && !builtinNow) mode = "detecting";
   else if (viewerFile.preferText || textOnly) mode = "text";
   else if (kind === "word") mode = webFail ? "text" : "docx-web";
@@ -220,7 +222,7 @@ export default function OfficePreviewPane() {
   else mode = "text";
   const webFallbackNote = webFail || imgFail;
   const badge =
-    mode === "xlsx" ? "原生表格" : mode === "pptx-images" ? "幻灯片" : mode === "docx-web" || mode === "pptx-web" ? "内置渲染" : "文本快速预览";
+    mode === "legacy-wait" ? "版式预览" : mode === "xlsx" ? "原生表格" : mode === "pptx-images" ? "幻灯片" : mode === "docx-web" || mode === "pptx-web" ? "内置渲染" : "文本快速预览";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50">
@@ -408,6 +410,11 @@ export default function OfficePreviewPane() {
       >
         {mode === "xlsx" ? (
           <XlsxGrid libraryId={current.id} relativePath={rel} reloadKey={reloadNonce} />
+        ) : mode === "legacy-wait" ? (
+          <div className="flex h-full flex-col items-center justify-center text-gray-400">
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <p className="mt-3 text-sm">正在生成版式预览…</p>
+          </div>
         ) : mode === "detecting" ? (
           <div className="flex h-full flex-col items-center justify-center text-gray-400">
             <Loader2 className="h-6 w-6 animate-spin" />
