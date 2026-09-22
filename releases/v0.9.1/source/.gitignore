@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node / Vite
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 本地发布快照：按全局规则仅 source/ 与 CHANGELOG.md 入库，二进制产物排除
+releases/**
+!releases/**/
+!releases/*/CHANGELOG.md
+!releases/*/source/**
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 产品设计文档与概念图：本地保留，不入库
+docs/01-产品设计/
+
+# 用户本地诊断材料（异常截图等）：本地保留，不入库
+/_Backup/
