@@ -907,7 +907,7 @@ export default function EditorPane() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* 顶部：返回、文件信息、模式切换、保存状态、历史 */}
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3">
+      <div className="flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b border-gray-200 bg-white px-3">
         <button
           type="button"
           onClick={() => void confirmDiscard().then((ok) => ok && closeFile())}

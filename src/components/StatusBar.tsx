@@ -97,11 +97,11 @@ export default function StatusBar() {
   }
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-gray-200 bg-white px-3 text-xs text-gray-500">
-      <div className="flex items-center gap-3">
+    <footer className="flex h-6 shrink-0 items-center justify-between gap-3 whitespace-nowrap border-t border-gray-200 bg-white px-3 text-xs text-gray-500">
+      <div className="flex min-w-0 items-center gap-3 overflow-hidden">
         {current && (
           <>
-            <span className="max-w-[220px] truncate font-medium text-gray-600" title={current.rootPath}>
+            <span className="max-w-[160px] shrink-0 truncate font-medium text-gray-600 xl:max-w-[220px]" title={current.rootPath}>
               {current.settings?.adhoc ? `单文件 · ${current.name}` : current.name}
             </span>
             <span aria-hidden="true">|</span>
@@ -120,10 +120,10 @@ export default function StatusBar() {
           </>
         )}
         {scanNode}
-        <span aria-hidden="true">|</span>
-        <span>本地优先 · 文件保存在原位置</span>
+        <span aria-hidden="true" className="hidden xl:inline">|</span>
+        <span className="hidden xl:inline">本地优先 · 文件保存在原位置</span>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         {runningCount > 0 && (
           <button
             type="button"

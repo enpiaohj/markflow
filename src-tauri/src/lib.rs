@@ -47,12 +47,15 @@ fn take_pending_open_paths(pending: State<'_, openfile::PendingOpen>) -> Vec<Str
     std::mem::take(&mut *pending.0.lock_safe())
 }
 
-/// 最近打开的文件（仅保留仍存在的）。
+/// 最近打开的文件（仅保留仍存在的；Office 锁文件等系统临时文件不显示）。
 #[tauri::command]
 fn list_recent_files(state: State<'_, AppState>) -> Vec<openfile::RecentFile> {
     openfile::read_recent(&state.0.lock_safe())
         .into_iter()
-        .filter(|r| std::path::Path::new(&r.path).is_file())
+        .filter(|r| {
+            let p = std::path::Path::new(&r.path);
+            p.is_file() && !p.file_name().is_some_and(|n| library::is_system_temp_file(&n.to_string_lossy()))
+        })
         .collect()
 }
 

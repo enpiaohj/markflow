@@ -1,14 +1,11 @@
-import { FileText, FileImage, FileSpreadsheet, Presentation, ShieldCheck, X } from "lucide-react";
+import { ShieldCheck, X } from "lucide-react";
+import FileTypeIcon from "./FileTypeIcon";
 import { useLibrary, type DocTab } from "./LibraryContext";
 
+/** 标签图标：文档用与文件列表一致的系统文件图标，交付中心用盾牌 */
 function tabIcon(tab: DocTab) {
-  const cls = "h-3.5 w-3.5 shrink-0";
-  if (tab.kind === "delivery") return <ShieldCheck className={cls} />;
-  if (tab.kind === "image") return <FileImage className={cls} />;
-  const ext = tab.relativePath.split(".").pop()?.toLowerCase();
-  if (ext === "xlsx" || ext === "xls" || ext === "csv") return <FileSpreadsheet className={cls} />;
-  if (ext === "pptx" || ext === "ppt") return <Presentation className={cls} />;
-  return <FileText className={cls} />;
+  if (tab.kind === "delivery") return <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary-600" />;
+  return <FileTypeIcon format="other" name={tab.relativePath.split("/").pop() ?? tab.relativePath} size="xs" />;
 }
 
 /** 已打开文档的标签页（位于标题栏）：文档一直保留，直到点 × 关闭（有未保存修改会先确认） */

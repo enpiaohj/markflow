@@ -662,7 +662,7 @@ export default function LibraryView() {
   return (
     <div className="flex h-full min-h-0">
       {/* 左侧：库信息、智能集合、目录树 */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white xl:w-64">
         {managerOpen ? (
           <LibraryManagePanel />
         ) : layout === "selector" ? (
@@ -888,22 +888,22 @@ export default function LibraryView() {
               <p className="mt-3 text-sm">此文件夹为空</p>
             </div>
           ) : (
-            <table className="w-full text-left text-[13px]">
+            <table className="w-full table-fixed text-left text-[13px]">
               <thead className="sticky top-0 z-10 bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="px-4 py-2 font-medium">
-                    <button type="button" onClick={() => toggleSort("name")} className="flex items-center gap-0.5 hover:text-gray-700">
+                    <button type="button" onClick={() => toggleSort("name")} className="flex items-center gap-0.5 whitespace-nowrap hover:text-gray-700">
                       名称 {sortIcon("name")}
                     </button>
                   </th>
-                  <th className="w-28 px-3 py-2 font-medium">类型</th>
-                  <th className="w-44 px-3 py-2 font-medium">
-                    <button type="button" onClick={() => toggleSort("mtime")} className="flex items-center gap-0.5 hover:text-gray-700">
+                  <th className="hidden w-24 whitespace-nowrap px-3 py-2 font-medium xl:table-cell">类型</th>
+                  <th className="w-36 px-3 py-2 font-medium">
+                    <button type="button" onClick={() => toggleSort("mtime")} className="flex items-center gap-0.5 whitespace-nowrap hover:text-gray-700">
                       修改时间 {sortIcon("mtime")}
                     </button>
                   </th>
-                  <th className="w-24 px-3 py-2 font-medium">
-                    <button type="button" onClick={() => toggleSort("size")} className="flex items-center gap-0.5 hover:text-gray-700">
+                  <th className="w-20 px-3 py-2 font-medium">
+                    <button type="button" onClick={() => toggleSort("size")} className="flex items-center gap-0.5 whitespace-nowrap hover:text-gray-700">
                       大小 {sortIcon("size")}
                     </button>
                   </th>
@@ -936,17 +936,17 @@ export default function LibraryView() {
                       selected?.relativePath === entry.relativePath ? "bg-primary-50" : "hover:bg-gray-50"
                     }`}
                   >
-                    <td className="max-w-0 px-4 py-2">
-                      <span className="flex items-center gap-2.5">
+                    <td className="px-4 py-2">
+                      <span className="flex min-w-0 items-center gap-2.5">
                         <FileTypeIcon format={entry.format} name={entry.name} size="sm" />
                         <span className="truncate text-gray-800">{entry.name}</span>
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-gray-500">
+                    <td className="hidden truncate px-3 py-2 text-gray-500 xl:table-cell">
                       {entry.formatLabel}
                     </td>
-                    <td className="px-3 py-2 text-gray-500">{entry.isDir ? "—" : formatTime(entry.mtime)}</td>
-                    <td className="px-3 py-2 text-gray-500">{entry.isDir ? "—" : formatSize(entry.size)}</td>
+                    <td className="truncate whitespace-nowrap px-3 py-2 text-gray-500">{entry.isDir ? "—" : formatTime(entry.mtime)}</td>
+                    <td className="truncate whitespace-nowrap px-3 py-2 text-gray-500">{entry.isDir ? "—" : formatSize(entry.size)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -962,7 +962,7 @@ export default function LibraryView() {
       </section>
 
       {/* 右侧：详情面板 */}
-      <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white">
+      <aside className="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white xl:w-80">
         {selected ? (
           <div className="px-5 py-4">
             <div className="flex items-start gap-3">

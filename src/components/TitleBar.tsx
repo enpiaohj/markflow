@@ -78,23 +78,23 @@ export default function TitleBar() {
       className="flex h-12 shrink-0 items-center border-b border-gray-200 bg-white"
     >
       {/* 产品标识与文档库切换 */}
-      <div data-tauri-drag-region className="relative flex h-full items-center gap-2.5 pl-3 pr-2">
-        <img src="/markflow.png" alt="MarkFlow" className="h-6 w-6" draggable={false} />
-        <span data-tauri-drag-region className="text-[15px] font-semibold text-gray-900">
+      <div data-tauri-drag-region className="relative flex h-full min-w-0 shrink items-center gap-2.5 pl-3 pr-2">
+        <img src="/markflow.png" alt="MarkFlow" className="h-6 w-6 shrink-0" draggable={false} />
+        <span data-tauri-drag-region className="shrink-0 whitespace-nowrap text-[15px] font-semibold text-gray-900">
           MarkFlow
         </span>
         {version && (
-          <span data-tauri-drag-region className="text-[11px] text-gray-400" title={`MarkFlow v${version}`}>
+          <span data-tauri-drag-region className="hidden shrink-0 whitespace-nowrap text-[11px] text-gray-400 xl:inline" title={`MarkFlow v${version}`}>
             v{version}
           </span>
         )}
-        <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+        <span className="mx-1 h-4 w-px shrink-0 bg-gray-200" aria-hidden="true" />
         <MenuBar />
-        <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden="true" />
+        <span className="mx-1 h-4 w-px shrink-0 bg-gray-200" aria-hidden="true" />
         <button
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
-          className="flex max-w-[220px] items-center gap-1.5 rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
+          className="flex min-w-0 max-w-[220px] items-center gap-1.5 rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
         >
           <span className="truncate">
             {current ? (current.settings?.adhoc ? `单文件 · ${current.name}` : current.name) : "未打开文档库"}
@@ -174,7 +174,7 @@ export default function TitleBar() {
 
       {/* 全局搜索入口：点击或 Ctrl+K 进入搜索视图 */}
       <TabStrip />
-      <div data-tauri-drag-region className={`flex justify-center px-2 ${tabs.length > 0 ? "shrink-0" : "flex-1"}`}>
+      <div data-tauri-drag-region className={`flex min-w-0 justify-center px-2 ${tabs.length > 0 ? "shrink" : "flex-1"}`}>
         <button
           type="button"
           onClick={requestSearchView}
@@ -183,14 +183,14 @@ export default function TitleBar() {
         >
           <Search className="h-4 w-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-left">搜索文档、内容、标签…</span>
-          <kbd className={`${tabs.length > 0 ? "hidden" : ""} shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400`}>
+          <kbd className={`${tabs.length > 0 ? "hidden" : "hidden xl:inline"} shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400`}>
             Ctrl + K
           </kbd>
         </button>
       </div>
 
-      {/* 窗口控制 */}
-      <div className="flex h-full items-center">
+      {/* 窗口控制：始终完整显示，不被其他内容挤出窗口 */}
+      <div className="flex h-full shrink-0 items-center">
         <WindowButton onClick={() => appWindow.minimize()} label="最小化">
           <Minus className="h-4 w-4" />
         </WindowButton>

@@ -64,7 +64,8 @@ export default function HistoryView() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col overflow-y-auto px-6 py-5">
+    <div className="h-full overflow-y-auto">
+    <div className="mx-auto flex max-w-4xl flex-col px-8 py-6">
       <div>
         <h2 className="text-lg font-semibold text-gray-900">历史与恢复</h2>
         <p className="mt-0.5 text-[13px] text-gray-500">最近打开的文档，以及每次保存前自动创建的快照。</p>
@@ -149,6 +150,7 @@ export default function HistoryView() {
           ))}
         </ul>
       )}
+    </div>
     </div>
   );
 }

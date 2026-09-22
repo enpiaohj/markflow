@@ -66,7 +66,7 @@ export default function SearchView() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col px-6 py-5">
+    <div className="mx-auto flex h-full max-w-4xl flex-col px-8 py-6">
       {/* 搜索框 */}
       <div className="flex gap-2">
         <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 focus-within:border-primary-500">
@@ -116,9 +116,7 @@ export default function SearchView() {
             <Search className="h-7 w-7" />
             <p className="mt-3 text-sm">未找到与「{lastQuery}」匹配的内容</p>
             <p className="mt-1 text-xs text-gray-400">
-              {lastQuery.length < 3
-                ? "短关键词匹配范围有限，试试更长的关键词可获得更完整的正文检索结果"
-                : "请检查关键词，或确认文件已完成索引"}
+              请检查关键词，或确认文件已完成索引（状态栏显示「已索引」后即可搜索）
             </p>
           </div>
         ) : (

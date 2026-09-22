@@ -6,9 +6,13 @@ import * as api from "../lib/api";
 import { formatTime } from "../lib/format";
 import type { RecentFile } from "../lib/types";
 
+/** 开始页每个区块最多显示的条数：常见窗口高度下首屏完整显示、不裁切；更多内容经「查看全部」进入对应页面 */
+const MAX_LIBRARIES = 5;
+const MAX_RECENT_FILES = 4;
+
 /** 「开始」页：最近文档库与快速动作 */
 export default function HomeView() {
-  const { libraries, current, switchToLibrary, openWizard, pickAndOpenFile, openPath } = useLibrary();
+  const { libraries, current, switchToLibrary, openWizard, pickAndOpenFile, openPath, openManager, requestView } = useLibrary();
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
 
   useEffect(() => {
@@ -16,7 +20,8 @@ export default function HomeView() {
   }, []);
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col px-6 py-10">
+    <div className="h-full overflow-y-auto">
+    <div className="mx-auto flex min-h-full max-w-3xl flex-col px-6 py-8">
       <div className="flex items-center gap-4">
         <img src="/markflow.png" alt="" className="h-12 w-12" draggable={false} />
         <div>
@@ -59,9 +64,21 @@ export default function HomeView() {
         )}
       </div>
 
-      <p className="mb-3 mt-9 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+      <p className="mb-2.5 mt-7 flex items-center gap-1.5 text-sm font-medium text-gray-700">
         <Clock className="h-4 w-4 text-gray-400" />
         最近文档库（{libraries.length}）
+        {libraries.length > MAX_LIBRARIES && (
+          <button
+            type="button"
+            onClick={() => {
+              openManager();
+              requestView("library");
+            }}
+            className="ml-auto text-xs font-normal text-primary-600 hover:underline"
+          >
+            查看全部
+          </button>
+        )}
       </p>
       {libraries.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 px-6 py-10 text-center">
@@ -73,8 +90,8 @@ export default function HomeView() {
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {libraries.map((lib) => (
+        <ul className="shrink-0 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+          {libraries.slice(0, MAX_LIBRARIES).map((lib) => (
             <li key={lib.id}>
               <button
                 type="button"
@@ -83,7 +100,7 @@ export default function HomeView() {
                   current?.id === lib.id ? "bg-primary-50/60" : ""
                 }`}
               >
-                <FolderOpen className="h-5 w-5 shrink-0 text-amber-500" />
+                <FileTypeIcon format="directory" size="sm" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-gray-900">
                     {lib.name}
@@ -107,12 +124,21 @@ export default function HomeView() {
 
       {recentFiles.length > 0 && (
         <>
-          <p className="mb-3 mt-8 flex items-center gap-1.5 text-sm font-medium text-gray-700">
+          <p className="mb-2.5 mt-6 flex items-center gap-1.5 text-sm font-medium text-gray-700">
             <FileText className="h-4 w-4 text-gray-400" />
             最近打开的文件
+            {recentFiles.length > MAX_RECENT_FILES && (
+              <button
+                type="button"
+                onClick={() => requestView("history")}
+                className="ml-auto text-xs font-normal text-primary-600 hover:underline"
+              >
+                查看全部
+              </button>
+            )}
           </p>
-          <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
-            {recentFiles.slice(0, 6).map((f) => (
+          <ul className="shrink-0 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {recentFiles.slice(0, MAX_RECENT_FILES).map((f) => (
               <li key={f.path}>
                 <button
                   type="button"
@@ -137,6 +163,7 @@ export default function HomeView() {
         <br />
         可通过「文件 → 打开文件」直接编辑任意文件，也可添加文档库获得统一搜索与管理。
       </p>
+    </div>
     </div>
   );
 }

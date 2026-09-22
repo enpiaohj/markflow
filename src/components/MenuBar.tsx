@@ -253,14 +253,14 @@ export default function MenuBar() {
   ];
 
   return (
-    <div ref={rootRef} className="flex h-full items-center">
+    <div ref={rootRef} className="flex h-full shrink-0 items-center">
       {menus.map((menu, i) => (
         <div key={menu.label} className="relative">
           <button
             type="button"
             onClick={() => setOpenMenu(openMenu === i ? null : i)}
             onMouseEnter={() => openMenu !== null && setOpenMenu(i)}
-            className={`h-7 rounded-md px-2.5 text-[13px] ${
+            className={`h-7 whitespace-nowrap rounded-md px-2.5 text-[13px] ${
               openMenu === i ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-100"
             }`}
           >

@@ -63,7 +63,7 @@ export default function TasksView() {
   const finishedCount = tasks.filter((t) => t.status !== "running").length;
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col px-6 py-5">
+    <div className="mx-auto flex h-full max-w-4xl flex-col px-8 py-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">后台任务</h2>
@@ -89,7 +89,7 @@ export default function TasksView() {
           <p className="mt-1 text-xs">添加文档库或文件变化触发重扫时，任务会出现在这里</p>
         </div>
       ) : (
-        <ul className="mt-4 mb-6 min-h-0 flex-1 overflow-y-auto divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
+        <ul className="mt-4 mb-6 min-h-0 overflow-y-auto divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {tasks.map((task) => (
             <TaskRow key={task.id} task={task} onCancel={(id) => void cancelTask(id)} />
           ))}

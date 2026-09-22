@@ -179,9 +179,10 @@ export default function FileTypeIcon({
   format: string;
   /** 文件名（用于按扩展名取系统图标）；不传时只用内置图标 */
   name?: string;
-  size?: "sm" | "md";
+  /** xs = 16px（标签页）/ sm = 24px（列表）/ md = 32px（详情） */
+  size?: "xs" | "sm" | "md";
 }) {
-  const cls = size === "sm" ? "h-6 w-6" : "h-8 w-8";
+  const cls = size === "xs" ? "h-4 w-4" : size === "sm" ? "h-6 w-6" : "h-8 w-8";
   const isDir = format === "directory";
   const sys = useSysIcon(isDir ? FOLDER_KEY : name !== undefined ? iconKeyForName(name) : null);
 
@@ -195,7 +196,7 @@ export default function FileTypeIcon({
   if (isDir) {
     return (
       <span className={`${cls} flex shrink-0 items-center justify-center`} aria-hidden="true">
-        <Folder className="h-5 w-5 fill-amber-400 text-amber-400" />
+        <Folder className={`${size === "xs" ? "h-3.5 w-3.5" : "h-5 w-5"} fill-amber-400 text-amber-400`} />
       </span>
     );
   }

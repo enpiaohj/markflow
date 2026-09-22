@@ -398,7 +398,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
     <div className="flex h-full min-h-0 flex-col bg-gray-100/70">
       <style>{`.mf-pdf-hit{background:rgba(250,204,21,.45)!important;color:transparent}`}</style>
       {/* 工具栏 */}
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3">
+      <div className="flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b border-gray-200 bg-white px-3">
         <button
           type="button"
           onClick={closeViewer}
