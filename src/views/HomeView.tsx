@@ -17,7 +17,7 @@ export default function HomeView() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col px-6 py-10">
       <div className="flex items-center gap-4">
-        <img src="/markflow.svg" alt="" className="h-12 w-12" draggable={false} />
+        <img src="/markflow.png" alt="" className="h-12 w-12" draggable={false} />
         <div>
           <h1 className="text-xl font-bold text-gray-900">MarkFlow</h1>
           <p className="mt-0.5 text-[13px] text-gray-500">

@@ -79,7 +79,7 @@ export default function TitleBar() {
     >
       {/* 产品标识与文档库切换 */}
       <div data-tauri-drag-region className="relative flex h-full items-center gap-2.5 pl-3 pr-2">
-        <img src="/markflow.svg" alt="MarkFlow" className="h-6 w-6" draggable={false} />
+        <img src="/markflow.png" alt="MarkFlow" className="h-6 w-6" draggable={false} />
         <span data-tauri-drag-region className="text-[15px] font-semibold text-gray-900">
           MarkFlow
         </span>
