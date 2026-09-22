@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-22
+
 ### Added
 
 - 侧栏目录树与中央文件列表的右键菜单新增「复制路径」：复制该文件 / 文件夹的 Windows 绝对路径，
@@ -23,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 界面文案统一：「创建文档库 / 新建文档库」统一为「添加文档库」——各入口（开始页、文档库页、
   管理文档库、标题栏下拉、文件菜单）打开的是同一个向导，且都只索引已存在的文件夹，并无「新建」
   语义；向导标题、步骤名「确认创建 → 确认添加」与相关提示同步调整，文档相应更新。
+- 《使用指南》《开发指南》同步：复制路径菜单项、旧版 .xls 说明、测试清单（74 项）。
 
 ## [0.8.2] - 2026-09-22
 
