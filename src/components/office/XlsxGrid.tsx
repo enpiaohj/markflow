@@ -22,6 +22,18 @@ function colName(i: number): string {
   return s;
 }
 
+/**
+ * Excel「套用表格格式」的表格通常不给每个单元格写显式边框——边框 / 隔行底色由内置表格样式
+ * （如 TableStyleMedium2）按名字动态绘制，这类样式定义不在文件里，我们没有实现。工作表关闭了
+ * 普通网格线（常见于这类表格，因为原本就是靠表格样式画线）时，表格区域会完全看不出行列分隔。
+ * 这里退而求其次：表格数据范围（`sheet.autoFilter`）内的单元格总是画一圈浅色网格线，
+ * 视觉上仍能看出「这是一张表」，不等价还原具体的表格样式配色。
+ */
+function inTableRange(sheet: XSheet, r: number, c: number): boolean {
+  const f = sheet.autoFilter;
+  return !!f && r >= f[0] && r <= f[2] && c >= f[1] && c <= f[3];
+}
+
 function cellCss(style: XStyle | undefined, cell: XCell, showGrid: boolean): React.CSSProperties {
   const css: React.CSSProperties = {
     borderRight: showGrid ? "1px solid #e5e7eb" : "1px solid transparent",
@@ -399,9 +411,10 @@ function SheetGrid({ sheet, styles }: { sheet: XSheet; styles: XStyle[] }) {
                     const cell = rowCells?.get(c);
                     const span = ignoreMerge ? undefined : model.spans.get(key);
                     const style = cell ? styles[cell.s] : undefined;
+                    const effectiveGrid = sheet.showGrid || inTableRange(sheet, r, c);
                     const css: React.CSSProperties = cell
-                      ? cellCss(style, cell, sheet.showGrid)
-                      : { borderRight: sheet.showGrid ? "1px solid #e5e7eb" : "1px solid transparent", borderBottom: sheet.showGrid ? "1px solid #e5e7eb" : "1px solid transparent" };
+                      ? cellCss(style, cell, effectiveGrid)
+                      : { borderRight: effectiveGrid ? "1px solid #e5e7eb" : "1px solid transparent", borderBottom: effectiveGrid ? "1px solid #e5e7eb" : "1px solid transparent" };
                     const frozenCol = c < sheet.frozenCols;
                     if (frozenRow || frozenCol) {
                       css.position = "sticky";
