@@ -164,7 +164,13 @@ pub fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Result<Vec<u8>,
                 let stderr = err_handle.join().unwrap_or_default();
                 if !status.success() {
                     let msg = String::from_utf8_lossy(&stderr);
-                    return Err(format!("组件退出码 {:?}: {}", status.code(), msg.lines().next().unwrap_or("")));
+                    let detail = msg.lines().next().unwrap_or("").trim();
+                    let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "未知".into());
+                    return Err(if detail.is_empty() {
+                        format!("外部组件运行失败（退出代码 {code}）")
+                    } else {
+                        format!("外部组件运行失败（退出代码 {code}）：{detail}")
+                    });
                 }
                 return Ok(stdout);
             }
