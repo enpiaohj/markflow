@@ -119,6 +119,32 @@ export function setLibraryLayout(pref: LibraryLayoutPref): void {
   }
 }
 
+const MAX_LIST_KEY = "mf-pref-max-list-render";
+/** 「不限」的存储值：文件夹条目一次性渲染完，文件夹极大时可能明显卡顿，需用户主动选择 */
+const MAX_LIST_UNLIMITED = "0";
+const DEFAULT_MAX_LIST_RENDER = 2000;
+
+/** 单个文件夹一次最多渲染的条目数（目录树 / 中央列表）；默认 2000，可调，也可选择不限（可能卡顿）。 */
+export function getMaxListRender(): number {
+  try {
+    const v = localStorage.getItem(MAX_LIST_KEY);
+    if (v === MAX_LIST_UNLIMITED) return Infinity;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_LIST_RENDER;
+  } catch {
+    return DEFAULT_MAX_LIST_RENDER;
+  }
+}
+
+export function setMaxListRender(value: number): void {
+  try {
+    localStorage.setItem(MAX_LIST_KEY, value === Infinity ? MAX_LIST_UNLIMITED : String(Math.max(1, Math.round(value))));
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 const THEME_KEY = "mf-pref-theme";
 
 /** 主题：light 浅色（默认）/ dark 深色 / system 跟随系统 */

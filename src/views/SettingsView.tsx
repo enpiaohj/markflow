@@ -26,6 +26,8 @@ import {
   getOfficeEngine,
   getTheme,
   getLibraryLayout,
+  getMaxListRender,
+  setMaxListRender,
   getEditorWrap,
   getLargeFileMb,
   getMaxEditMb,
@@ -113,6 +115,7 @@ export default function SettingsView() {
   const [largeMb, setLargeMb] = useState(getLargeFileMb());
   const [maxMb, setMaxMb] = useState(getMaxEditMb());
   const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
+  const [maxListRender, setMaxListRenderState] = useState(getMaxListRender());
   const [autosave, setAutosaveState] = useState(getAutosave());
   const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
   const [shell, setShell] = useState<{ closeToTray: boolean; autostart: boolean } | null>(null);
@@ -297,6 +300,49 @@ export default function SettingsView() {
       ),
     },
     {
+      section: "appearance",
+      label: "单个文件夹显示上限",
+      description: "目录树与中央列表都会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。",
+      keywords: "文件夹 文件数 上限 卡顿 性能 虚拟滚动 渲染 不限",
+      node: (
+        <SettingRow
+          key="maxListRender"
+          label="单个文件夹显示上限"
+          description="目录树与中央列表都会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。"
+        >
+          <div className="flex items-center gap-2">
+            <Segmented
+              value={Number.isFinite(maxListRender) ? "limit" : "unlimited"}
+              options={[
+                { key: "limit", label: "限制" },
+                { key: "unlimited", label: "不限" },
+              ]}
+              onChange={(v) => {
+                const next = v === "unlimited" ? Infinity : 2000;
+                setMaxListRender(next);
+                setMaxListRenderState(next);
+              }}
+            />
+            {Number.isFinite(maxListRender) && (
+              <input
+                type="number"
+                min={100}
+                step={100}
+                value={maxListRender}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || v < 1) return;
+                  setMaxListRender(v);
+                  setMaxListRenderState(v);
+                }}
+                className="h-7 w-24 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-800 outline-none focus:border-primary-500"
+              />
+            )}
+          </div>
+        </SettingRow>
+      ),
+    },
+    {
       section: "editor",
       label: "大文件保护",
       description: "大文件保护：超过「保护模式」大小的文件会关闭语法高亮、折叠、括号联动与诊断以保证输入流畅，仍可编辑；超过「拒绝编辑」大小则不在应用内打开，引导使用 VS Code 等外部工具。",
@@ -411,7 +457,7 @@ export default function SettingsView() {
     const custom = SECTIONS.filter((s) => ["ai", "components", "about"].includes(s.id) && `${s.label} ${s.keywords}`.toLowerCase().includes(q));
     return { simple, custom };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, theme, layout, wrap, largeMb, maxMb, autosave, officeEngine, shell, shellBusy]);
+  }, [q, theme, layout, maxListRender, wrap, largeMb, maxMb, autosave, officeEngine, shell, shellBusy]);
 
   const sectionLabel = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.label ?? "";
 

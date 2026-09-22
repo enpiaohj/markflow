@@ -25,19 +25,13 @@ import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
-import { getLibraryLayout, getOfficeEngine } from "../lib/prefs";
+import { getLibraryLayout, getMaxListRender, getOfficeEngine } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
 import type { FileEntry, LibraryMeta } from "../lib/types";
 
 type SortKey = "name" | "mtime" | "size";
 
-/**
- * 单个目录一次渲染的条目上限：目录树与中央列表都不做虚拟滚动，一个文件夹里几万个条目
- * 会直接生成对应数量的 DOM 节点，导致界面明显卡顿甚至短暂无响应。超出后只渲染前
- * MAX_LIST_RENDER 项并给出提示——文档库的主要查找方式是全文 / 文件名搜索，不依赖
- * 在超大文件夹里逐条滚动。
- */
-const MAX_LIST_RENDER = 2000;
+
 
 /** 激活其他库后需要延后执行的动作可用的回调（取自新库渲染后的最新版本） */
 interface PendingHandlers {
@@ -68,6 +62,8 @@ interface TreeCtx {
   onSelect: (entry: FileEntry) => void;
   onOpen: (entry: FileEntry) => void;
   onContextMenu: (entry: FileEntry, x: number, y: number) => void;
+  /** 单个目录一次渲染的条目上限（设置 → 外观），超出给出提示；「不限」为 Infinity */
+  maxRender: number;
 }
 
 function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx: TreeCtx }) {
@@ -122,12 +118,12 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
               加载中…
             </p>
           )}
-          {children?.slice(0, MAX_LIST_RENDER).map((child) => (
+          {children?.slice(0, ctx.maxRender).map((child) => (
             <TreeNode key={child.relativePath} entry={child} depth={depth + 1} ctx={ctx} />
           ))}
-          {children && children.length > MAX_LIST_RENDER && (
+          {children && children.length > ctx.maxRender && (
             <p className="py-1 text-xs text-gray-400" style={{ paddingLeft: `${(depth + 1) * 14 + 26}px` }}>
-              还有 {(children.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+              还有 {(children.length - ctx.maxRender).toLocaleString()} 项未显示，请用搜索定位
             </p>
           )}
         </div>
@@ -149,6 +145,7 @@ function LibrarySection({
   expanded,
   contentVersion,
   selectedPath,
+  maxRender,
   onToggle,
   onActivate,
   onClose,
@@ -167,6 +164,7 @@ function LibrarySection({
   expanded: boolean;
   contentVersion: number;
   selectedPath: string | null;
+  maxRender: number;
   onToggle: () => void;
   onActivate: () => void;
   onClose: () => void;
@@ -239,6 +237,7 @@ function LibrarySection({
     cache,
     toggle: (e) => void toggleDir(e),
     selectedPath,
+    maxRender,
     onSelect,
     onOpen,
     onContextMenu,
@@ -251,12 +250,12 @@ function LibrarySection({
           <p className="py-2 text-center text-xs text-gray-400">（空）</p>
         ) : (
           <>
-            {treeRoot.slice(0, MAX_LIST_RENDER).map((entry) => (
+            {treeRoot.slice(0, maxRender).map((entry) => (
               <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />
             ))}
-            {treeRoot.length > MAX_LIST_RENDER && (
+            {treeRoot.length > maxRender && (
               <p className="py-1 pl-2 text-xs text-gray-400">
-                还有 {(treeRoot.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+                还有 {(treeRoot.length - maxRender).toLocaleString()} 项未显示，请用搜索定位
               </p>
             )}
           </>
@@ -310,12 +309,12 @@ function LibrarySection({
             <p className="py-1 pl-4 text-xs text-gray-400">（空）</p>
           ) : (
             <>
-              {treeRoot.slice(0, MAX_LIST_RENDER).map((entry) => (
+              {treeRoot.slice(0, maxRender).map((entry) => (
                 <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />
               ))}
-              {treeRoot.length > MAX_LIST_RENDER && (
+              {treeRoot.length > maxRender && (
                 <p className="py-1 pl-4 text-xs text-gray-400">
-                  还有 {(treeRoot.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+                  还有 {(treeRoot.length - maxRender).toLocaleString()} 项未显示，请用搜索定位
                 </p>
               )}
             </>
@@ -337,12 +336,16 @@ export default function LibraryView() {
   const appDialog = useDialog();
   const [importing, setImporting] = useState(false);
   const [layout, setLayout] = useState(getLibraryLayout());
+  const [maxListRender, setMaxListRender] = useState(getMaxListRender());
   const [pickerOpen, setPickerOpen] = useState(false);
   /** 刚打开 / 切换到库、尚未有任何用户操作：根目录加载后默认定位到第一项 */
   const autoPickRef = useRef(false);
   const [revealPath, setRevealPath] = useState<string | null>(null);
   useEffect(() => {
-    const f = () => setLayout(getLibraryLayout());
+    const f = () => {
+      setLayout(getLibraryLayout());
+      setMaxListRender(getMaxListRender());
+    };
     window.addEventListener("markflow:prefs-changed", f);
     return () => window.removeEventListener("markflow:prefs-changed", f);
   }, []);
@@ -721,6 +724,7 @@ export default function LibraryView() {
                   expanded
                   contentVersion={contentVersion}
                   selectedPath={selected?.relativePath ?? null}
+                  maxRender={maxListRender}
                   onToggle={() => {}}
                   onActivate={() => {}}
                   onClose={() => {}}
@@ -785,6 +789,7 @@ export default function LibraryView() {
               expanded={expandedLibs.has(lib.id)}
               contentVersion={contentVersion}
               selectedPath={current?.id === lib.id ? (selected?.relativePath ?? null) : null}
+              maxRender={maxListRender}
               onToggle={() => toggleLibExpanded(lib.id)}
               onActivate={() => inLibrary(lib, (h) => (current?.id === lib.id ? h.navigate("") : h.noop()))}
               onClose={() => void closeLibraryInWorkspace(lib.id)}
@@ -912,7 +917,7 @@ export default function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {sortedList.slice(0, MAX_LIST_RENDER).map((entry) => (
+                {sortedList.slice(0, maxListRender).map((entry) => (
                   <tr
                     key={entry.relativePath}
                     onClick={() => setSelected(entry)}
@@ -951,10 +956,10 @@ export default function LibraryView() {
             </table>
           )}
         </div>
-        {sortedList.length > MAX_LIST_RENDER && (
+        {sortedList.length > maxListRender && (
           <div className="flex items-center gap-2 border-t border-gray-200 bg-amber-50 px-4 py-1.5 text-[11px] text-amber-700">
             <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
-            此文件夹共 {sortedList.length.toLocaleString()} 项，为保证流畅仅显示前 {MAX_LIST_RENDER.toLocaleString()} 项，其余请用搜索定位
+            此文件夹共 {sortedList.length.toLocaleString()} 项，为保证流畅仅显示前 {maxListRender.toLocaleString()} 项，其余请用搜索定位
           </div>
         )}
       </section>
