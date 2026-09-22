@@ -29,6 +29,23 @@ import type {
   VersionInfo,
 } from "./types";
 
+/** 导入磁盘上的图片到文档目录下的 assets/，返回相对文档目录的路径 */
+export function importImageAsset(libraryId: string, parentDir: string, srcPath: string): Promise<string> {
+  return invoke("import_image_asset", { libraryId, parentDir, srcPath });
+}
+
+/** 保存粘贴的图片字节到文档目录下的 assets/，返回相对文档目录的路径（二进制 IPC，参数走请求头） */
+export function saveImageBytes(libraryId: string, parentDir: string, stem: string, ext: string, bytes: ArrayBuffer): Promise<string> {
+  return invoke("save_image_bytes", bytes, {
+    headers: {
+      "x-library-id": encodeURIComponent(libraryId),
+      "x-parent-dir": encodeURIComponent(parentDir),
+      "x-stem": encodeURIComponent(stem),
+      "x-ext": encodeURIComponent(ext),
+    },
+  });
+}
+
 /** 外壳偏好：关闭时最小化到通知区域、开机启动（以注册表为准） */
 export function getShellPrefs(): Promise<{ closeToTray: boolean; autostart: boolean }> {
   return invoke("get_shell_prefs");

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
 import { Table } from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
@@ -9,7 +8,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "tiptap-markdown";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { basicSetup, EditorView as CMEditorView } from "codemirror";
 import type { ViewUpdate } from "@codemirror/view";
 import { markdown as markdownLang } from "@codemirror/lang-markdown";
@@ -24,8 +23,12 @@ import {
   Eye,
   FileCode,
   History,
+  ImagePlus,
   Italic,
   Link2,
+  Minus,
+  Strikethrough,
+  Code,
   List,
   MessageSquarePlus,
   ListOrdered,
@@ -47,8 +50,12 @@ import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import { MENU_SAVE_EVENT } from "./MenuBar";
 import { useZoom } from "./ZoomContext";
+import { useEditorStatus } from "./EditorStatusContext";
+import { LocalImage, makeImageResolver } from "./editor/LocalImage";
+import { open as openImageDialog } from "@tauri-apps/plugin-dialog";
+import { countText } from "../lib/wordCount";
 import * as api from "../lib/api";
-import { getAutosave } from "../lib/prefs";
+import { getAutosave, getEditorWrap } from "../lib/prefs";
 import type { CheckIssue } from "../lib/types";
 import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
 import type { FileEntry, VersionInfo } from "../lib/types";
@@ -59,6 +66,26 @@ type SaveState = "saved" | "dirty" | "saving" | "error";
 function splitFrontMatter(text: string): { front: string; body: string } {
   const m = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
   return m ? { front: m[0], body: text.slice(m[0].length) } : { front: "", body: text };
+}
+
+/** 同一个列表里既有 `- [ ]` 任务项又有普通项：可视化模式会拆成两个列表并多出一个空任务项。 */
+function hasMixedTaskList(body: string): boolean {
+  let hasTask = false;
+  let hasPlain = false;
+  const flush = () => hasTask && hasPlain;
+  for (const line of body.split(/\r?\n/)) {
+    const m = /^\s*[-*+]\s+(\[[ xX]\]\s)?/.exec(line);
+    if (m) {
+      if (m[1]) hasTask = true;
+      else hasPlain = true;
+    } else if (line.trim() !== "" && !/^\s+\S/.test(line)) {
+      // 遇到非列表、非缩进的正文：一个列表块结束
+      if (flush()) return true;
+      hasTask = false;
+      hasPlain = false;
+    }
+  }
+  return flush();
 }
 
 /** 可视化模式无法无损往返的 Markdown 语法（切换前提示，避免静默改写 / 丢失）。 */
@@ -72,6 +99,7 @@ function detectVisualRisks(body: string): string[] {
   if (/\$\$[\s\S]+?\$\$/.test(noCode)) risks.push("数学公式");
   if (/```mermaid/.test(body)) risks.push("Mermaid 图表");
   if (/^>\s*\[![A-Za-z]+\]/m.test(noCode)) risks.push("Callout 提示块");
+  if (hasMixedTaskList(noCode)) risks.push("任务项与普通项混排的列表");
   return risks;
 }
 
@@ -84,17 +112,51 @@ const draftKey = (libraryId: string, rel: string) => `mf-draft:${libraryId}:${re
 
 function VisualEditor({
   initial,
+  libraryId,
+  docPath,
   onChange,
   onPolish,
   registerSelection,
 }: {
   initial: string;
+  libraryId: string;
+  docPath: string;
   onChange: (md: string) => void;
   onPolish: () => void;
   registerSelection: (fn: () => string) => void;
 }) {
   const { config: zoomConfig } = useZoom();
   const dialog = useDialog();
+  const docDir = docPath.includes("/") ? docPath.slice(0, docPath.lastIndexOf("/")) : "";
+  const docDirRef = useRef(docDir);
+  docDirRef.current = docDir;
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null);
+
+  /** 把图片文件保存到文档旁的 assets/ 并插入编辑器（相对路径写进 Markdown） */
+  async function insertImageFromBytes(bytes: ArrayBuffer, stem: string, ext: string) {
+    try {
+      const rel = await api.saveImageBytes(libraryId, docDirRef.current, stem, ext, bytes);
+      editorRef.current?.chain().focus().setImage({ src: rel, alt: stem }).run();
+    } catch (err) {
+      await dialog.alert(`插入图片失败：${err}`, "插入失败");
+    }
+  }
+
+  async function pickImage() {
+    const picked = await openImageDialog({
+      multiple: false,
+      title: "插入图片",
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"] }],
+    });
+    if (!picked || Array.isArray(picked)) return;
+    try {
+      const rel = await api.importImageAsset(libraryId, docDirRef.current, picked);
+      const stem = rel.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+      editorRef.current?.chain().focus().setImage({ src: rel, alt: stem }).run();
+    } catch (err) {
+      await dialog.alert(`插入图片失败：${err}`, "插入失败");
+    }
+  }
   async function onLink(ed: NonNullable<ReturnType<typeof useEditor>>) {
     const previous = (ed.getAttributes("link").href as string | undefined) ?? "";
     const url = await dialog.prompt({
@@ -111,9 +173,32 @@ function VisualEditor({
     }
   }
   const editor = useEditor({
+    // 工具栏要随光标所在位置更新（标题级别 / 表格操作 / 高亮状态）
+    shouldRerenderOnTransaction: true,
+    editorProps: {
+      // Ctrl+K：插入 / 编辑链接（全局搜索改用 Ctrl+Shift+F，见 App.tsx）
+      handleKeyDown: (_view, event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          if (editorRef.current) void onLink(editorRef.current);
+          return true;
+        }
+        return false;
+      },
+      // 粘贴图片（如截图）：保存到 assets/ 并插入
+      handlePaste: (_view, event) => {
+        const item = [...(event.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+        const file = item?.getAsFile();
+        if (!file) return false;
+        event.preventDefault();
+        const ext = file.type.split("/")[1]?.replace("jpeg", "jpg").replace("svg+xml", "svg") || "png";
+        void file.arrayBuffer().then((buf) => insertImageFromBytes(buf, `image-${Date.now()}`, ext));
+        return true;
+      },
+    },
     extensions: [
       StarterKit,
-      Image,
+      LocalImage.configure({ inline: true, resolve: makeImageResolver(libraryId, docDir, (id, path) => api.readFileBytes(id, path)) }),
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
@@ -130,6 +215,8 @@ function VisualEditor({
       onChange(storage.markdown?.getMarkdown() ?? "");
     },
   });
+
+  editorRef.current = editor;
 
   useEffect(() => {
     if (!editor) return;
@@ -155,12 +242,27 @@ function VisualEditor({
         <button type="button" className={btn(editor.isActive("italic"))} title="斜体"
           onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-3.5 w-3.5" /></button>
         <span className="mx-1 h-4 w-px bg-gray-200" />
-        <button type="button" className={btn(editor.isActive("heading", { level: 1 }))} title="标题 1"
-          onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>H1</button>
-        <button type="button" className={btn(editor.isActive("heading", { level: 2 }))} title="标题 2"
-          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</button>
-        <button type="button" className={btn(editor.isActive("heading", { level: 3 }))} title="标题 3"
-          onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</button>
+        <button type="button" className={btn(editor.isActive("strike"))} title="删除线"
+          onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="h-3.5 w-3.5" /></button>
+        <button type="button" className={btn(editor.isActive("code"))} title="行内代码"
+          onClick={() => editor.chain().focus().toggleCode().run()}><Code className="h-3.5 w-3.5" /></button>
+        <span className="mx-1 h-4 w-px bg-gray-200" />
+        <select
+          aria-label="段落样式"
+          title="段落样式（标题 1–6 / 正文）"
+          value={([1, 2, 3, 4, 5, 6] as const).find((l) => editor.isActive("heading", { level: l })) ?? 0}
+          onChange={(e) => {
+            const level = Number(e.target.value) as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+            if (level === 0) editor.chain().focus().setParagraph().run();
+            else editor.chain().focus().setHeading({ level }).run();
+          }}
+          className="h-7 rounded-md border border-gray-200 bg-white px-1.5 text-[12px] text-gray-600 outline-none hover:bg-gray-50"
+        >
+          <option value={0}>正文</option>
+          {[1, 2, 3, 4, 5, 6].map((l) => (
+            <option key={l} value={l}>标题 {l}</option>
+          ))}
+        </select>
         <span className="mx-1 h-4 w-px bg-gray-200" />
         <button type="button" className={btn(editor.isActive("bulletList"))} title="无序列表"
           onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-3.5 w-3.5" /></button>
@@ -177,9 +279,17 @@ function VisualEditor({
           onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>
           <Table2 className="h-3.5 w-3.5" />
         </button>
-        <button type="button" className={btn(editor.isActive("link"))} title="插入 / 编辑链接"
+        <button type="button" className={btn(editor.isActive("link"))} title="插入 / 编辑链接（Ctrl+K）"
           onClick={() => void onLink(editor)}>
           <Link2 className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className={btn(false)} title="插入图片（也可直接粘贴截图；保存到文档旁的 assets/）"
+          onClick={() => void pickImage()}>
+          <ImagePlus className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className={btn(false)} title="分割线"
+          onClick={() => editor.chain().focus().setTextSelection(editor.state.selection.to).setHorizontalRule().run()}>
+          <Minus className="h-3.5 w-3.5" />
         </button>
         <span className="mx-1 h-4 w-px bg-gray-200" />
         <button type="button" className={btn(false)} title="撤销"
@@ -197,6 +307,30 @@ function VisualEditor({
           AI 润色
         </button>
       </div>
+
+      {/* 表格操作：光标在表格内时出现 */}
+      {editor.isActive("table") && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 bg-primary-50/40 px-4 py-1 text-[12px] text-gray-600">
+          <span className="mr-1 text-gray-400">表格</span>
+          {[
+            ["上方加行", () => editor.chain().focus().addRowBefore().run()],
+            ["下方加行", () => editor.chain().focus().addRowAfter().run()],
+            ["左侧加列", () => editor.chain().focus().addColumnBefore().run()],
+            ["右侧加列", () => editor.chain().focus().addColumnAfter().run()],
+            ["删除行", () => editor.chain().focus().deleteRow().run()],
+            ["删除列", () => editor.chain().focus().deleteColumn().run()],
+          ].map(([label, run]) => (
+            <button key={label as string} type="button" onClick={run as () => void}
+              className="rounded-md border border-gray-200 bg-white px-2 py-0.5 hover:bg-gray-50">
+              {label as string}
+            </button>
+          ))}
+          <button type="button" onClick={() => editor.chain().focus().deleteTable().run()}
+            className="rounded-md border border-red-100 bg-white px-2 py-0.5 text-red-600 hover:bg-red-50">
+            删除表格
+          </button>
+        </div>
+      )}
 
       {/* 分页文档画布 */}
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100/70 px-6 py-8">
@@ -231,16 +365,24 @@ function langExtension(format: string) {
 function SourceEditor({
   initial,
   format,
+  wrap,
   onChange,
+  onCursor,
   registerSelection,
 }: {
   initial: string;
   format: string;
+  wrap: boolean;
   onChange: (text: string) => void;
+  onCursor: (line: number, col: number) => void;
   registerSelection: (fn: () => string) => void;
 }) {
   const { config: zoomConfig } = useZoom();
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<CMEditorView | null>(null);
+  const wrapCompartment = useRef(new Compartment());
+  const onCursorRef = useRef(onCursor);
+  onCursorRef.current = onCursor;
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -250,20 +392,33 @@ function SourceEditor({
         extensions: [basicSetup, langExtension(format),
           // 编辑器撑满容器，由内部 scroller 出滚动条（否则长文本被外层 overflow-hidden 截断）
           CMEditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { overflow: "auto" } }),
+          wrapCompartment.current.of(wrap ? CMEditorView.lineWrapping : []),
           CMEditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) onChange(update.state.doc.toString());
+            if (update.docChanged || update.selectionSet) {
+              const head = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(head);
+              onCursorRef.current(line.number, head - line.from + 1);
+            }
           }),
         ],
       }),
       parent: hostRef.current,
     });
+    viewRef.current = view;
     registerSelection(() => {
       const sel = view.state.selection as unknown as { from: number; to: number };
       return view.state.sliceDoc(sel.from, sel.to);
     });
+    onCursorRef.current(1, 1);
     return () => view.destroy();
     // initial 仅在挂载时使用；编辑中的变化通过 onChange 上抛，切换编辑器由 key 重建完成
   }, []);
+
+  // 「自动换行」偏好变化时无需重建编辑器
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: wrapCompartment.current.reconfigure(wrap ? CMEditorView.lineWrapping : []) });
+  }, [wrap]);
 
   return (
     <div
@@ -306,6 +461,9 @@ export default function EditorPane() {
   const [aiProviderId, setAiProviderId] = useState<string | null>(null);
   const [aiProviderLabel, setAiProviderLabel] = useState("");
   const [autosave, setAutosaveOn] = useState(getAutosave());
+  const [wrap, setWrapOn] = useState(getEditorWrap());
+  const [cursor, setCursor] = useState<{ line: number; col: number } | null>(null);
+  const { publish: publishStatus } = useEditorStatus();
 
   useEffect(() => {
     void api.aiListProviders().then((list) => {
@@ -323,7 +481,10 @@ export default function EditorPane() {
   }, [openFile]);
 
   useEffect(() => {
-    const onPrefs = () => setAutosaveOn(getAutosave());
+    const onPrefs = () => {
+      setAutosaveOn(getAutosave());
+      setWrapOn(getEditorWrap());
+    };
     window.addEventListener("markflow:prefs-changed", onPrefs);
     return () => window.removeEventListener("markflow:prefs-changed", onPrefs);
   }, []);
@@ -571,6 +732,18 @@ export default function EditorPane() {
   const dirty = editText !== savedText;
 
   // 向全局上报未保存状态（活动栏切换时用于离开确认）
+  // 字数（Front Matter 不计）与光标位置发布到状态栏；仅激活的标签发布，离开时清除
+  useEffect(() => {
+    if (!tabActive || loadState !== "ok") return;
+    const c = countText(splitFrontMatter(editText).body);
+    publishStatus({
+      total: c.total,
+      chars: c.chars,
+      ...(mode === "source" && cursor ? { line: cursor.line, col: cursor.col } : {}),
+    });
+    return () => publishStatus(null);
+  }, [tabActive, loadState, editText, mode, cursor, publishStatus]);
+
   useEffect(() => {
     setEditorDirty(dirty);
     return () => setEditorDirty(false);
@@ -1002,6 +1175,8 @@ export default function EditorPane() {
           {mode === "visual" ? (
             <VisualEditor
               key={`v-${modeEpoch}`}
+              libraryId={current.id}
+              docPath={rel}
               initial={splitFrontMatter(editText).body}
               onChange={(md) => setEditText(splitFrontMatter(editText).front + md)}
               onPolish={() => void startPolish()}
@@ -1012,6 +1187,8 @@ export default function EditorPane() {
               key={`s-${modeEpoch}`}
               initial={editText}
               format={entry?.format ?? "text"}
+              wrap={wrap}
+              onCursor={(line, col) => setCursor({ line, col })}
               onChange={setEditText}
               registerSelection={(fn) => (selectionFnRef.current = fn)}
             />

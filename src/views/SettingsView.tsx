@@ -24,6 +24,8 @@ import {
   getOfficeEngine,
   getTheme,
   getLibraryLayout,
+  getEditorWrap,
+  setEditorWrap,
   setLibraryLayout,
   type LibraryLayoutPref,
   setAutosave,
@@ -39,7 +41,7 @@ type SectionId = "general" | "appearance" | "editor" | "preview" | "ai" | "compo
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; keywords: string }[] = [
   { id: "general", label: "通用", icon: SlidersHorizontal, keywords: "启动 开机 自启 托盘 通知区域 关闭 最小化 后台" },
   { id: "appearance", label: "外观", icon: Palette, keywords: "主题 深色 浅色 暗色 夜间 跟随系统 颜色" },
-  { id: "editor", label: "编辑器", icon: PenLine, keywords: "自动保存 保存 草稿" },
+  { id: "editor", label: "编辑器", icon: PenLine, keywords: "自动保存 保存 草稿 换行 折行" },
   { id: "preview", label: "预览", icon: Eye, keywords: "Word PowerPoint Office 内置渲染 引擎 版式 docx pptx" },
   { id: "ai", label: "AI", icon: Bot, keywords: "provider 模型 密钥 api key 接口 大模型" },
   { id: "components", label: "组件", icon: Puzzle, keywords: "pandoc libreoffice edge 转换 检测" },
@@ -51,7 +53,8 @@ const SHORTCUTS = [
   ["Ctrl + N", "新建文档"],
   ["Ctrl + S", "保存"],
   ["Ctrl + W", "关闭当前文档"],
-  ["Ctrl + K", "搜索"],
+  ["Ctrl + K", "搜索（在可视化编辑器内为插入 / 编辑链接）"],
+  ["Ctrl + Shift + F", "搜索（任何位置都可用）"],
   ["Ctrl + + / − / 0", "放大 / 缩小 / 实际大小（也可 Ctrl + 滚轮）"],
   ["F11", "全屏"],
 ];
@@ -93,6 +96,7 @@ export default function SettingsView() {
 
   // ---- 偏好 ----
   const [theme, setThemeState] = useState<ThemePref>(getTheme());
+  const [wrap, setWrapState] = useState(getEditorWrap());
   const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
   const [autosave, setAutosaveState] = useState(getAutosave());
   const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
@@ -279,6 +283,24 @@ export default function SettingsView() {
     },
     {
       section: "editor",
+      label: "源码模式自动换行",
+      description: "开启后，源码模式与纯文本（.txt、日志等）中过长的行自动折行显示，不再需要左右拖动；关闭则保持单行并横向滚动。",
+      keywords: "换行 折行 长文本 横向滚动 源码 文本 wrap",
+      node: (
+        <SettingRow key="wrap" label="源码模式自动换行" description="开启后，源码模式与纯文本（.txt、日志等）中过长的行自动折行显示，不再需要左右拖动；关闭则保持单行并横向滚动。">
+          <Toggle
+            label="源码模式自动换行"
+            checked={wrap}
+            onChange={(v) => {
+              setEditorWrap(v);
+              setWrapState(v);
+            }}
+          />
+        </SettingRow>
+      ),
+    },
+    {
+      section: "editor",
       label: "自动保存",
       description: AUTOSAVE_DESC,
       keywords: "保存 草稿 快照",
@@ -325,7 +347,7 @@ export default function SettingsView() {
     const custom = SECTIONS.filter((s) => ["ai", "components", "about"].includes(s.id) && `${s.label} ${s.keywords}`.toLowerCase().includes(q));
     return { simple, custom };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, theme, layout, autosave, officeEngine, shell, shellBusy]);
+  }, [q, theme, layout, wrap, autosave, officeEngine, shell, shellBusy]);
 
   const sectionLabel = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.label ?? "";
 

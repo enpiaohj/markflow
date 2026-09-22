@@ -7,6 +7,7 @@ mod delivery;
 mod editor;
 mod format;
 mod fsops;
+mod images;
 mod library;
 mod ocr;
 mod office;
@@ -235,6 +236,58 @@ fn get_office_preview(
         relative_path.rsplit('/').next().unwrap_or(&relative_path),
     );
     office::preview(&path, format)
+}
+
+/// 导入磁盘上的图片到文档所在目录的 `assets/`，返回相对文档目录的路径。
+#[tauri::command]
+fn import_image_asset(
+    state: State<'_, AppState>,
+    library_id: String,
+    parent_dir: String,
+    src_path: String,
+) -> Result<String, String> {
+    images::import_image(&state.0.lock().unwrap(), &library_id, &parent_dir, &src_path)
+}
+
+/// 保存粘贴的图片字节（二进制 IPC：请求体为原始字节，参数放在请求头，中文经 URL 编码）。
+#[tauri::command]
+fn save_image_bytes(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("请求体必须是图片字节".into());
+    };
+    let header = |name: &str| -> Result<String, String> {
+        let v = request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| format!("缺少参数 {name}"))?;
+        Ok(percent_decode(v))
+    };
+    // 文档在库根目录时 x-parent-dir 为空串，空值请求头可能被丢弃，缺省按空处理
+    let parent_dir = header("x-parent-dir").unwrap_or_default();
+    let (library_id, stem, ext) = (header("x-library-id")?, header("x-stem")?, header("x-ext")?);
+    let conn = state.0.lock().unwrap();
+    let meta = library::get_library(&conn, &library_id)?;
+    images::save_image(&conn, &meta, &parent_dir, &stem, &ext, bytes)
+}
+
+/// 解码前端 `encodeURIComponent` 的请求头值。
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 读取已登记文件的原始字节（供 PDF.js 等前端渲染器使用，二进制 IPC）。
@@ -1207,6 +1260,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            import_image_asset,
+            save_image_bytes,
             get_shell_prefs,
             set_close_to_tray,
             set_autostart,

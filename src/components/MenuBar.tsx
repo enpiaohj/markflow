@@ -30,7 +30,7 @@ const SHORTCUTS_HELP = [
   "Ctrl + N　新建文档（在当前文档库根目录）",
   "Ctrl + S　保存",
   "Ctrl + W　关闭当前文档",
-  "Ctrl + K　搜索",
+  "Ctrl + K / Ctrl + Shift + F　搜索",
   "Ctrl + + / Ctrl + − / Ctrl + 0　放大 / 缩小 / 实际大小",
   "Ctrl + 鼠标滚轮　缩放文档视图",
   "F11　全屏",
@@ -216,7 +216,7 @@ export default function MenuBar() {
         { label: "粘贴", shortcut: "Ctrl+V", onClick: exec("paste") },
         { label: "全选", shortcut: "Ctrl+A", onClick: exec("selectAll") },
         { separator: true },
-        { label: "在文档库中搜索…", shortcut: "Ctrl+K", onClick: requestSearchView },
+        { label: "在文档库中搜索…", shortcut: "Ctrl+Shift+F", onClick: requestSearchView },
       ],
     },
     {

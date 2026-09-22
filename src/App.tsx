@@ -13,6 +13,7 @@ import PdfViewer from "./components/PdfViewer";
 import OfficePreviewPane from "./components/OfficePreviewPane";
 import { DialogProvider, useDialog } from "./components/DialogContext";
 import { LibraryProvider, TabScope, useLibrary } from "./components/LibraryContext";
+import { EditorStatusProvider } from "./components/EditorStatusContext";
 import { ZoomProvider, ZoomScope } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
 import DeliveryView from "./views/DeliveryView";
@@ -108,7 +109,11 @@ function Shell() {
   // 全局快捷键 Ctrl+K 打开搜索
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      const isK = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k";
+      const isShiftF = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f";
+      // 可视化编辑器内 Ctrl+K 用于插入链接，不触发全局搜索；Ctrl+Shift+F 在任何位置都能搜索
+      const inVisualEditor = e.target instanceof Element && !!e.target.closest(".ProseMirror");
+      if ((isK && !inVisualEditor) || isShiftF) {
         e.preventDefault();
         requestSearchView();
       }
@@ -175,7 +180,9 @@ export default function App() {
       <ZoomProvider>
         <LibraryProvider>
           <TasksProvider>
-            <Shell />
+            <EditorStatusProvider>
+              <Shell />
+            </EditorStatusProvider>
           </TasksProvider>
         </LibraryProvider>
       </ZoomProvider>

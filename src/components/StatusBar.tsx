@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { AlertCircle, CheckCircle2, ListTodo, Loader2 } from "lucide-react";
 import { useLibrary } from "./LibraryContext";
+import { useEditorStatus } from "./EditorStatusContext";
 import { useTasks } from "./TasksContext";
 import { useZoom, zoomPresets } from "./ZoomContext";
 
@@ -12,6 +13,7 @@ export default function StatusBar() {
   const { current: activeLib, displayLibrary, scanStatus, requestTasksView } = useLibrary();
   const current = displayLibrary ?? activeLib;
   const { runningCount } = useTasks();
+  const { status: editorStatus } = useEditorStatus();
   const { config, zoomIn, zoomOut, setValue, reset } = useZoom();
   const [presetOpen, setPresetOpen] = useState(false);
 
@@ -49,6 +51,17 @@ export default function StatusBar() {
             <span className="max-w-[220px] truncate font-medium text-gray-600" title={current.rootPath}>
               {current.settings?.adhoc ? `单文件 · ${current.name}` : current.name}
             </span>
+            <span aria-hidden="true">|</span>
+          </>
+        )}
+        {editorStatus && (
+          <>
+            <span className="tabular-nums" title={`${editorStatus.chars.toLocaleString()} 个非空白字符`}>
+              {editorStatus.total.toLocaleString()} 字
+            </span>
+            {editorStatus.line !== undefined && (
+              <span className="tabular-nums">第 {editorStatus.line} 行，第 {editorStatus.col} 列</span>
+            )}
             <span aria-hidden="true">|</span>
           </>
         )}

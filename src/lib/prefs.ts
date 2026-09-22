@@ -45,6 +45,26 @@ export function setOfficeEngine(pref: OfficeEnginePref): void {
   }
 }
 
+const WRAP_KEY = "mf-pref-editor-wrap";
+
+/** 源码模式（含 .txt / 日志等纯文本）是否自动换行，默认开启 */
+export function getEditorWrap(): boolean {
+  try {
+    return localStorage.getItem(WRAP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setEditorWrap(on: boolean): void {
+  try {
+    localStorage.setItem(WRAP_KEY, on ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 const LAYOUT_KEY = "mf-pref-library-layout";
 
 /** 左侧文档库列表布局：selector 单库 + 顶部选择器（默认）/ side 并列多库（各库可折叠） */
