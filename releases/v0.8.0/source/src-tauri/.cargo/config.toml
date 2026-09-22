@@ -1,0 +1,13 @@
+# 项目级 cargo 配置：使用国内镜像源（rsproxy.cn），
+# 仅在本项目生效，不影响机器全局配置；外网代理恢复后可按需移除。
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "sparse+https://rsproxy.cn/index/"
+
+[net]
+git-fetch-with-cli = true
