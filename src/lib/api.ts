@@ -128,6 +128,11 @@ export function statFileMtime(libraryId: string, relativePath: string): Promise<
   return invoke("stat_file_mtime", { libraryId, relativePath });
 }
 
+/** 提取本机（资源管理器）标准文件类型图标：格式 id → PNG data URL；失败返回空表。 */
+export function getSysFileTypeIcons(): Promise<Record<string, string>> {
+  return invoke("get_file_type_icons");
+}
+
 export function appInfo(): Promise<{ name: string; version: string }> {
   return invoke("app_info");
 }

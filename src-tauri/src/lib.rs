@@ -17,6 +17,7 @@ mod openfile;
 mod pptxslides;
 mod selfwrite;
 mod shell;
+mod sysicon;
 mod sensitive;
 mod tasks;
 mod textenc;
@@ -24,6 +25,7 @@ mod watch;
 mod xlsxview;
 
 use library::{AppState, CreateLibraryRequest};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use watch::WatchState;
@@ -105,6 +107,12 @@ fn app_info() -> serde_json::Value {
         "name": env!("CARGO_PKG_NAME"),
         "version": env!("CARGO_PKG_VERSION"),
     })
+}
+
+/// 提取本机（资源管理器）标准文件类型图标：格式 id → PNG data URL；失败返回空表（前端用内置图标）。
+#[tauri::command]
+fn get_file_type_icons() -> HashMap<String, String> {
+    sysicon::cached()
 }
 
 #[tauri::command]
@@ -1327,6 +1335,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            get_file_type_icons,
             import_image_asset,
             open_with_external,
             vscode_available,
