@@ -135,6 +135,19 @@ export default function OfficePreviewPane() {
   // Word / Excel 等外部程序保存后回到 MarkFlow：重新解析并重新生成版式预览
   useExternalChange(current?.id, rel, () => setReloadNonce((n) => n + 1), !!viewerFile);
 
+  // 旧版 .xls / OpenDocument .ods 无法用内置表格视图解析：装有 Office / LibreOffice 时
+  // 自动生成版式预览直接显示（与 Word 的自动版式预览行为一致），无引擎时停留可读提示
+  const legacyExcel = viewerFile?.kind === "office" && /\.(xls|ods)$/i.test(rel);
+  const legacyTriedRef = useRef("");
+  useEffect(() => {
+    if (!current || !viewerFile || !legacyExcel || !engine) return;
+    const stamp = `${current.id}:${viewerFile.nonce}:${rel}`;
+    if (legacyTriedRef.current === stamp) return;
+    legacyTriedRef.current = stamp;
+    void openHifi(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacyExcel, engine, viewerFile, current]);
+
   if (!current || !viewerFile) return null;
 
   const openInSystem = () => void api.openPathInSystem(current.id, rel);

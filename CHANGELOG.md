@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **中央文件列表此前没有右键菜单**：「复制路径」及整个右键菜单（重命名 / 移动 / 删除等）此前只接在
+  侧栏目录树上，中栏文件列表行右键无响应；现已接上同一菜单，两侧行为一致。
+
+### Changed
+
+- **旧版 .xls / OpenDocument .ods 打开时自动改用版式预览**：装有 Microsoft Office / LibreOffice 时
+  双击这类文件会自动在后台生成版式预览并直接显示（与 Word 的行为一致），不再停留在文字提示；
+  没有可用引擎时维持原可读提示。.ods 此前还会报「缺少 xl/workbook.xml」内部错误，已改为可读提示
+  并补充回归测试。
+
 ## [0.9.0] - 2026-09-22
 
 ### Added

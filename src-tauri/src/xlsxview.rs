@@ -114,7 +114,19 @@ pub fn load(path: &Path) -> Result<XlsxView, String> {
     let (styles, xf_formats) = parse_styles(&styles_xml, &theme);
     let shared = read(&mut zip, "xl/sharedStrings.xml").map(|x| parse_shared(&x)).unwrap_or_default();
 
-    let workbook = read(&mut zip, "xl/workbook.xml").ok_or("缺少 xl/workbook.xml")?;
+    // OpenDocument（.ods）是 zip 包但结构完全不同（content.xml 而非 xl/），同样给出可读提示
+    let workbook = match read(&mut zip, "xl/workbook.xml") {
+        Some(x) => x,
+        None if read(&mut zip, "content.xml").is_some() => {
+            return Err(
+                "这是 OpenDocument（.ods）表格格式，内置表格视图只支持 .xlsx。\
+                 可安装 LibreOffice 或 Microsoft Office 后使用工具栏的「打印版式预览」查看，\
+                 或使用系统应用打开，也可以另存为 .xlsx 后再打开。"
+                    .to_string(),
+            );
+        }
+        None => return Err("缺少 xl/workbook.xml".to_string()),
+    };
     let wb = Document::parse(&workbook).map_err(|e| format!("workbook.xml 解析失败: {e}"))?;
     let date1904 = wb
         .descendants()
@@ -1152,5 +1164,20 @@ mod tests {
         assert!(err.contains("旧版 .xls"), "实际错误：{err}");
         assert!(err.contains("打印版式预览"), "应包含建议操作：{err}");
         assert!(!err.contains("xl/workbook.xml"));
+    }
+
+    /// OpenDocument（.ods）是 zip 但结构不同（content.xml），应得到可读提示而非「缺少 xl/workbook.xml」。
+    #[test]
+    fn odf_file_gets_friendly_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("文档.ods");
+        let file = std::fs::File::create(&p).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("content.xml", SimpleFileOptions::default()).unwrap();
+        zip.write_all(br#"<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"/>"#).unwrap();
+        zip.finish().unwrap();
+        let err = load(&p).unwrap_err();
+        assert!(err.contains("OpenDocument"), "实际错误：{err}");
+        assert!(!err.contains("缺少 xl/workbook.xml"));
     }
 }

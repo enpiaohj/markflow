@@ -941,6 +941,10 @@ export default function LibraryView() {
                     key={entry.relativePath}
                     onClick={() => setSelected(entry)}
                     onDoubleClick={() => openEntry(entry)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (current) openContext(entry, e.clientX, e.clientY, current);
+                    }}
                     title={
                       entry.isDir
                         ? "双击进入目录"
