@@ -243,6 +243,7 @@ pub fn push_recent(conn: &Connection, path: &str) {
 
 #[cfg(test)]
 mod tests {
+    use crate::lockext::LockExt;
     use super::*;
     use crate::library::{create_library, run_migrations, CreateLibraryRequest};
 
@@ -330,7 +331,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("方案.docx"), "docx 占位").unwrap();
         let t = {
-            let conn = state.0.lock().unwrap();
+            let conn = state.0.lock_safe();
             resolve(&conn, &dir.path().join("方案.docx").to_string_lossy()).unwrap()
         };
         assert!(t.adhoc);
@@ -341,7 +342,7 @@ mod tests {
         // 反例：不登记白名单，直接插入索引 —— 随后的重扫（走生产用的 scan_library_locked，
         // 会按 settings.files 白名单限制单文件库的扫描范围）会把它当「已消失」删掉
         {
-            let conn = state.0.lock().unwrap();
+            let conn = state.0.lock_safe();
             let meta = library::get_library(&conn, &t.library_id).unwrap();
             ensure_indexed(&conn, &meta, "方案.md").unwrap();
             assert!(crate::editor::read_text_file(&conn, &t.library_id, "方案.md").is_ok());
@@ -349,7 +350,7 @@ mod tests {
         let outcome = library::scan_library_locked(&state, &t.library_id, dir.path(), &[], library::ScanOptions::default()).unwrap();
         assert_eq!(outcome.file_count, 1); // 只有原来登记过的 方案.docx
         {
-            let conn = state.0.lock().unwrap();
+            let conn = state.0.lock_safe();
             assert!(
                 crate::editor::read_text_file(&conn, &t.library_id, "方案.md").is_err(),
                 "复现：未登记白名单时，重扫会把刚插入的文件再次删掉"
@@ -358,14 +359,14 @@ mod tests {
 
         // 正例：登记白名单后，重扫应保留该文件（修复后 convert_docx_to_markdown 的实际做法）
         {
-            let conn = state.0.lock().unwrap();
+            let conn = state.0.lock_safe();
             let meta = library::get_library(&conn, &t.library_id).unwrap();
             register_adhoc_file(&conn, &t.library_id, "方案.md").unwrap();
             ensure_indexed(&conn, &meta, "方案.md").unwrap();
         }
         let outcome = library::scan_library_locked(&state, &t.library_id, dir.path(), &[], library::ScanOptions::default()).unwrap();
         assert_eq!(outcome.file_count, 2); // 方案.docx + 方案.md
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let read = crate::editor::read_text_file(&conn, &t.library_id, "方案.md").unwrap();
         assert!(read.content.contains("正文"));
     }

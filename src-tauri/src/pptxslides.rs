@@ -205,6 +205,7 @@ pub fn read_slide(cache_dir: &Path, key: &str, index: usize) -> Result<Vec<u8>, 
 
 #[cfg(test)]
 mod tests {
+    use crate::lockext::LockExt;
     use super::*;
 
     #[test]
@@ -257,10 +258,10 @@ mod tests {
         run_with_timeout(&mut cmd, Duration::from_secs(90)).expect("生成测试 pptx 失败");
         let cache = dir.path().join("cache");
         let seen = std::sync::Mutex::new(Vec::new());
-        let meta = export_slides(&cache, &pptx, &|p| seen.lock().unwrap().push(p.ready)).expect("导出失败");
+        let meta = export_slides(&cache, &pptx, &|p| seen.lock_safe().push(p.ready)).expect("导出失败");
         assert_eq!(meta.count, 2);
         assert!(read_slide(&cache, &meta.key, 1).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
-        assert_eq!(*seen.lock().unwrap().last().unwrap(), 2);
+        assert_eq!(*seen.lock_safe().last().unwrap(), 2);
         // 第二次命中缓存
         let again = export_slides(&cache, &pptx, &|_| {}).unwrap();
         assert_eq!(again.count, 2);

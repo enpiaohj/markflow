@@ -1,6 +1,7 @@
 //! 应用自身写入的文件标记：文件监听据此忽略自己触发的事件，
 //! 避免每次保存都引发整库重扫，也避免临时文件被当作库内文件。
 
+use crate::lockext::LockExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -17,7 +18,7 @@ fn table() -> &'static Mutex<HashMap<PathBuf, Instant>> {
 }
 
 pub fn mark(path: &Path) {
-    let mut t = table().lock().unwrap();
+    let mut t = table().lock_safe();
     t.retain(|_, at| at.elapsed() < WINDOW * 4);
     t.insert(path.to_path_buf(), Instant::now());
 }

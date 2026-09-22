@@ -1,6 +1,7 @@
 //! 文档库服务（设计文档 §6 文档库模型、§11 数据设计）：
 //! 库 = 用户选择的普通本地文件夹；SQLite 只存索引与元数据，绝不作为正文唯一副本。
 
+use crate::lockext::LockExt;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,6 +32,14 @@ pub const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
 
 /// 参与文本提取与全文索引的格式（Office/PDF 提取引擎在后续迭代接入）。
 pub const TEXT_FORMATS: &[&str] = &["markdown", "text", "code", "json", "yaml", "xml", "config", "csv"];
+
+/// 扫描时提取正文、写入全文索引的格式：文本类 + Office（Word / Excel / PowerPoint 走 OOXML 安全解析）。
+/// 与 TEXT_FORMATS（可在应用内编辑的文本格式）区分。
+pub const INDEX_FORMATS: &[&str] = &["markdown", "text", "code", "json", "yaml", "xml", "config", "csv", "word", "excel", "powerpoint"];
+
+fn is_indexable(format: &str) -> bool {
+    INDEX_FORMATS.contains(&format)
+}
 
 /// 文本提取大小上限：超过则记录 too_large，不做正文索引。
 pub const MAX_EXTRACT_BYTES: u64 = 2 * 1024 * 1024;
@@ -388,13 +397,26 @@ pub fn migrate_path_refs(conn: &Connection, library_id: &str, old_rel: &str, new
 // 目录扫描
 // ---------------------------------------------------------------------------
 
-/// 判断条目是否应被排除（隐藏项、默认排除目录、用户自定义排除目录）。
+/// 系统 / 办公软件生成的临时文件（资源管理器默认隐藏，不是用户内容）：
+/// Office 打开文档时的锁文件 `~$*`、Word 自动保存临时文件 `~*.tmp`、缩略图缓存与文件夹配置。
+/// 这类文件在用户打开 / 关闭文档时频繁创建删除，既不应入库，也不应触发文件监听重扫。
+pub fn is_system_temp_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("~$")
+        || (lower.starts_with('~') && lower.ends_with(".tmp"))
+        || matches!(lower.as_str(), "thumbs.db" | "ehthumbs.db" | "desktop.ini")
+}
+
+/// 判断条目是否应被排除（隐藏项、系统临时文件、默认排除目录、用户自定义排除目录）。
 fn is_excluded(entry: &walkdir::DirEntry, exclude: &[String]) -> bool {
     if entry.depth() == 0 {
         return false; // 根目录本身不排除
     }
     let name = entry.file_name().to_string_lossy();
     if name.starts_with('.') {
+        return true;
+    }
+    if !entry.file_type().is_dir() && is_system_temp_file(&name) {
         return true;
     }
     if entry.file_type().is_dir() {
@@ -532,6 +554,9 @@ fn collect_scan_rows(
             ));
         }
     }
+    if let Some(report) = on_progress {
+        report(rows.len() as u64); // 遍历结束：上报准确总数（过程中按每 256 项上报）
+    }
     Ok((rows, skipped))
 }
 
@@ -565,7 +590,7 @@ pub(crate) fn extract_for_index(file_path: &Path, name: &str) -> (String, Option
         match std::fs::metadata(file_path) {
             Ok(m) if m.len() <= crate::office::MAX_OFFICE_BYTES => {
                 match crate::office::extract_text(file_path, format) {
-                    Ok(t) if !t.trim().is_empty() => ("ok".to_string(), Some(t)),
+                    Ok(t) if !t.trim().is_empty() => ("ok".to_string(), Some(truncate_utf8(t, MAX_EXTRACT_BYTES as usize))),
                     Ok(_) => ("parse_error".to_string(), None),
                     Err(_) => ("parse_error".to_string(), None),
                 }
@@ -580,6 +605,18 @@ pub(crate) fn extract_for_index(file_path: &Path, name: &str) -> (String, Option
             Err(_) => ("read_error".to_string(), None),
         }
     }
+}
+
+/// 按字节上限截断字符串（落在 UTF-8 字符边界上）。
+fn truncate_utf8(mut s: String, max: usize) -> String {
+    if s.len() > max {
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s.truncate(end);
+    }
+    s
 }
 
 fn store_extraction(conn: &Connection, file_id: i64, name: &str, status: &str, text: Option<String>) {
@@ -623,19 +660,31 @@ pub struct ExistingRow {
     size: i64,
     mtime: i64,
     format: String,
+    /// 是否已有正文提取记录（旧版本扫描不提取 Office 正文，这类文件需补提一次）
+    has_extract: bool,
 }
 
 pub type ExistingMap = std::collections::HashMap<String, ExistingRow>;
 
 pub fn load_existing(conn: &Connection, library_id: &str) -> Result<ExistingMap, String> {
     let mut stmt = conn
-        .prepare("SELECT relative_path, id, size, mtime, format FROM files WHERE library_id = ?1")
+        .prepare(
+            "SELECT f.relative_path, f.id, f.size, f.mtime, f.format,
+                    EXISTS(SELECT 1 FROM extracted_content e WHERE e.file_id = f.id)
+             FROM files f WHERE f.library_id = ?1",
+        )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([library_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                ExistingRow { id: row.get(1)?, size: row.get(2)?, mtime: row.get(3)?, format: row.get(4)? },
+                ExistingRow {
+                    id: row.get(1)?,
+                    size: row.get(2)?,
+                    mtime: row.get(3)?,
+                    format: row.get(4)?,
+                    has_extract: row.get(5)?,
+                },
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -647,6 +696,13 @@ fn is_unchanged(existing: &ExistingMap, row: &ScanRow) -> bool {
         .get(&row.relative_path)
         .map(|ex| ex.size == row.size && ex.mtime == row.mtime && ex.format == row.format)
         .unwrap_or(false)
+}
+
+/// 需要（重新）提取正文：新增 / 变更的可索引文件，或从未提取过（旧版本未索引的 Office 文件）。
+fn needs_extract(existing: &ExistingMap, row: &ScanRow) -> bool {
+    !row.is_dir
+        && is_indexable(&row.format)
+        && (!is_unchanged(existing, row) || existing.get(&row.relative_path).is_some_and(|ex| !ex.has_extract))
 }
 
 /// 扫描准备阶段的产物：目录遍历结果 + 变更文件的提取结果（均不需要数据库锁）。
@@ -670,22 +726,39 @@ pub fn scan_prepare(
         None => collect_scan_rows(root, exclude, opts.cancel, opts.on_progress)?,
     };
     let mut extracted = std::collections::HashMap::new();
+    let walked = rows.len() as u64;
     for (i, row) in rows.iter().enumerate() {
         if let Some(flag) = opts.cancel {
             if flag.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(ERR_CANCELED.into());
             }
         }
-        if !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str()) && !is_unchanged(existing, row) {
+        if needs_extract(existing, row) {
             extracted.insert(i, extract_for_index(&root.join(&row.relative_path), &row.name));
+            // 提取阶段继续上报进度（首次索引大量 Office 文件时可能耗时较长，避免进度停住像卡死）
+            if let Some(report) = opts.on_progress {
+                if extracted.len() % 16 == 0 {
+                    report(walked + extracted.len() as u64);
+                }
+            }
         }
     }
     Ok(Prepared { root: root.to_path_buf(), rows, skipped, extracted })
 }
 
-/// 阶段二（持锁，仅数据库写入）：增量更新 files / 提取表 / FTS，单事务，失败可回滚。
-pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Result<ScanOutcome, String> {
-    let Prepared { root, rows, skipped, extracted } = prepared;
+/// 待写入全文索引的正文：阶段二之后分批写入（每批单独短暂持锁）。
+pub struct PendingExtract {
+    file_id: i64,
+    name: String,
+    path: PathBuf,
+    /// 阶段一已提取的结果；None 表示需在写入前（无锁）补做提取
+    result: Option<(String, Option<String>)>,
+}
+
+/// 阶段二（持锁，仅元数据）：增量更新 files 表（新增 / 变更 / 删除），单事务，失败可回滚；
+/// 已变更文件的旧正文在同一事务内清除。耗时的正文写入（FTS 建索引）不在此处，见 `store_pending`。
+pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Result<(ScanOutcome, Vec<PendingExtract>), String> {
+    let Prepared { root, rows, skipped, mut extracted } = prepared;
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("开启索引事务失败: {e}"))?;
@@ -700,28 +773,26 @@ pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Re
         }
     }
 
+    let mut pending = Vec::new();
     for (i, row) in rows.iter().enumerate() {
-        let is_text = !row.is_dir && TEXT_FORMATS.contains(&row.format.as_str());
-        match existing.get(&row.relative_path) {
+        let is_text = !row.is_dir && is_indexable(&row.format);
+        let file_id = match existing.get(&row.relative_path) {
             Some(ex) => {
                 let unchanged = ex.size == row.size && ex.mtime == row.mtime && ex.format == row.format;
-                if unchanged && !extracted.contains_key(&i) {
+                // 未变化且已有正文：跳过；未变化但从未提取（旧版本未索引的 Office）：只补正文
+                if unchanged && (ex.has_extract || !is_text) && !extracted.contains_key(&i) {
                     continue;
                 }
-                tx.execute(
-                    "UPDATE files SET name = ?1, parent_path = ?2, is_dir = ?3, format = ?4, size = ?5, mtime = ?6
-                     WHERE id = ?7",
-                    params![row.name, row.parent_path, row.is_dir, row.format, row.size, row.mtime, ex.id],
-                )
-                .map_err(|e| format!("更新索引失败: {e}"))?;
-                if is_text {
-                    clear_extraction(&tx, ex.id).map_err(|e| e.to_string())?;
-                    let (status, text) = extracted
-                        .get(&i)
-                        .cloned()
-                        .unwrap_or_else(|| extract_for_index(&root.join(&row.relative_path), &row.name));
-                    store_extraction(&tx, ex.id, &row.name, &status, text);
+                if !unchanged {
+                    tx.execute(
+                        "UPDATE files SET name = ?1, parent_path = ?2, is_dir = ?3, format = ?4, size = ?5, mtime = ?6
+                         WHERE id = ?7",
+                        params![row.name, row.parent_path, row.is_dir, row.format, row.size, row.mtime, ex.id],
+                    )
+                    .map_err(|e| format!("更新索引失败: {e}"))?;
                 }
+                clear_extraction(&tx, ex.id).map_err(|e| e.to_string())?;
+                ex.id
             }
             None => {
                 tx.execute(
@@ -739,15 +810,16 @@ pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Re
                     ],
                 )
                 .map_err(|e| format!("写入索引失败: {e}"))?;
-                let id = tx.last_insert_rowid();
-                if is_text {
-                    let (status, text) = extracted
-                        .get(&i)
-                        .cloned()
-                        .unwrap_or_else(|| extract_for_index(&root.join(&row.relative_path), &row.name));
-                    store_extraction(&tx, id, &row.name, &status, text);
-                }
+                tx.last_insert_rowid()
             }
+        };
+        if is_text {
+            pending.push(PendingExtract {
+                file_id,
+                name: row.name.clone(),
+                path: root.join(&row.relative_path),
+                result: extracted.remove(&i),
+            });
         }
     }
     tx.commit().map_err(|e| format!("提交索引事务失败: {e}"))?;
@@ -757,7 +829,53 @@ pub fn scan_apply(conn: &Connection, library_id: &str, prepared: Prepared) -> Re
         params![file_count as i64, library_id],
     )
     .map_err(|e| e.to_string())?;
-    Ok(ScanOutcome { file_count, skipped })
+    Ok((ScanOutcome { file_count, skipped }, pending))
+}
+
+/// 单批正文写入的大致文本量：FTS trigram 建索引约 1MB/300ms，每批持锁控制在 ~150ms 以内
+const PENDING_BATCH_BYTES: usize = 512 * 1024;
+
+/// 把 pending 按文本量切成若干批（每批至少 1 条）。
+fn split_pending(mut pending: Vec<PendingExtract>) -> Vec<Vec<PendingExtract>> {
+    let mut batches = Vec::new();
+    let mut cur = Vec::new();
+    let mut bytes = 0usize;
+    for p in pending.drain(..) {
+        let len = p.result.as_ref().and_then(|(_, t)| t.as_ref()).map(|t| t.len()).unwrap_or(0);
+        if !cur.is_empty() && bytes + len > PENDING_BATCH_BYTES {
+            batches.push(std::mem::take(&mut cur));
+            bytes = 0;
+        }
+        bytes += len;
+        cur.push(p);
+    }
+    if !cur.is_empty() {
+        batches.push(cur);
+    }
+    batches
+}
+
+/// 写入一批正文（调用方持锁）：单事务；文件行已被并发删除或已有正文（被保存等操作更新过）时跳过。
+fn store_pending(conn: &Connection, batch: Vec<PendingExtract>) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| format!("开启索引事务失败: {e}"))?;
+    for p in batch {
+        let (status, text) = match p.result {
+            Some(r) => r,
+            None => extract_for_index(&p.path, &p.name),
+        };
+        let fresh: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM files WHERE id = ?1)
+                    AND NOT EXISTS(SELECT 1 FROM extracted_content WHERE file_id = ?1)",
+                [p.file_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if fresh {
+            store_extraction(&tx, p.file_id, &p.name, &status, text);
+        }
+    }
+    tx.commit().map_err(|e| format!("提交索引事务失败: {e}"))
 }
 
 /// 完整扫描结果：入库文件数与被跳过（被占用/无权限）的条目数。
@@ -783,14 +901,18 @@ pub struct ScanOptions<'a> {
 pub fn scan_library_with(conn: &Connection, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
     let existing = load_existing(conn, library_id)?;
     let prepared = scan_prepare(root, exclude, &existing, &opts, None)?;
-    scan_apply(conn, library_id, prepared)
+    let (outcome, pending) = scan_apply(conn, library_id, prepared)?;
+    for batch in split_pending(pending) {
+        store_pending(conn, batch)?;
+    }
+    Ok(outcome)
 }
 
 /// 完整扫描（不长期持锁版）：目录遍历与正文提取在无锁状态执行，仅写库时短暂持锁，
 /// 扫描期间其他命令（列目录、搜索、保存）不被阻塞。
 pub fn scan_library_locked(state: &AppState, library_id: &str, root: &Path, exclude: &[String], opts: ScanOptions<'_>) -> Result<ScanOutcome, String> {
     let (existing, only) = {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let meta = get_library(&conn, library_id)?;
         let only = if meta.settings.get("adhoc").and_then(|v| v.as_bool()).unwrap_or(false) {
             Some(
@@ -806,12 +928,83 @@ pub fn scan_library_locked(state: &AppState, library_id: &str, root: &Path, excl
         (load_existing(&conn, library_id)?, only)
     };
     let prepared = scan_prepare(root, exclude, &existing, &opts, only.as_deref())?;
-    let conn = state.0.lock().unwrap();
-    scan_apply(&conn, library_id, prepared)
+    let (outcome, pending) = {
+        let conn = state.0.lock_safe();
+        scan_apply(&conn, library_id, prepared)?
+    };
+    // 正文分批写入全文索引：每批单独短暂持锁，批次之间其他命令（列目录、搜索、保存）可以插队，
+    // 首次索引大量 Office 文件时界面不再被长时间阻塞
+    for mut batch in split_pending(pending) {
+        if let Some(flag) = opts.cancel {
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(ERR_CANCELED.into());
+            }
+        }
+        // 阶段一未提取的（竞态补漏）先在锁外提取
+        for p in batch.iter_mut().filter(|p| p.result.is_none()) {
+            p.result = Some(extract_for_index(&p.path, &p.name));
+        }
+        store_pending(&state.0.lock_safe(), batch)?;
+    }
+    Ok(outcome)
+}
+
+/// 全量扫描合并表：库 ID → 扫描进行期间是否又收到了扫描请求。
+/// 同一文档库同一时刻只跑一个全量扫描；进行中再来的请求不并行重复扫描，而是结束后补跑一次，
+/// 保证请求发出后的磁盘变化一定会被下一轮扫描看到。
+static SCAN_RUNS: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> = std::sync::Mutex::new(None);
+
+/// 各文档库最近一次成功完成全量扫描（含文件监听触发的自动重扫）的时间。
+static LAST_FULL_SCAN: std::sync::Mutex<Option<std::collections::HashMap<String, Instant>>> = std::sync::Mutex::new(None);
+
+/// 登记一次扫描请求：返回 true 表示应立即开始扫描；false 表示该库已在扫描中（已标记结束后补跑）。
+fn scan_run_begin(library_id: &str) -> bool {
+    let mut g = SCAN_RUNS.lock_safe();
+    let runs = g.get_or_insert_with(std::collections::HashMap::new);
+    match runs.get_mut(library_id) {
+        Some(again) => {
+            *again = true;
+            false
+        }
+        None => {
+            runs.insert(library_id.to_string(), false);
+            true
+        }
+    }
+}
+
+/// 一轮扫描结束：返回 true 表示期间又有请求、需要再扫一轮；false 表示该库扫描结束（已注销）。
+fn scan_run_end(library_id: &str) -> bool {
+    let mut g = SCAN_RUNS.lock_safe();
+    let runs = g.get_or_insert_with(std::collections::HashMap::new);
+    match runs.get_mut(library_id) {
+        Some(again) if *again => {
+            *again = false;
+            true
+        }
+        _ => {
+            runs.remove(library_id);
+            false
+        }
+    }
+}
+
+/// 记录某库完成了一次成功的全量扫描。
+pub fn mark_full_scan(library_id: &str) {
+    LAST_FULL_SCAN
+        .lock_safe()
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(library_id.to_string(), Instant::now());
+}
+
+/// 某库最近一次成功全量扫描的时间（本次运行期间）。
+pub fn last_full_scan(library_id: &str) -> Option<Instant> {
+    LAST_FULL_SCAN.lock_safe().as_ref().and_then(|m| m.get(library_id).copied())
 }
 
 /// 完整扫描（后台线程版，纳入任务中心）：扫描 → 提取 → 重建索引，
 /// 全程通过 `tasks:updated` 上报进度，结束后发送 `scan:completed` / `scan:failed` / `scan:canceled`。
+/// 同一文档库的并发请求会被合并（见 SCAN_RUNS）。
 pub fn spawn_full_scan(
     app: AppHandle,
     state: AppState,
@@ -821,7 +1014,10 @@ pub fn spawn_full_scan(
     root: PathBuf,
     exclude: Vec<String>,
 ) {
-    std::thread::spawn(move || {
+    if !scan_run_begin(&library_id) {
+        return; // 该库正在扫描：结束后会自动补跑一轮
+    }
+    std::thread::spawn(move || loop {
         let started = Instant::now();
         let task_id = tasks.begin(crate::tasks::TaskKind::Scan, &format!("扫描索引 · {library_name}"));
         let cancel = tasks.attach_cancel(&task_id);
@@ -841,6 +1037,7 @@ pub fn spawn_full_scan(
 
         match &result {
             Ok(outcome) => {
+                mark_full_scan(&library_id);
                 tasks.finish(
                     &task_id,
                     crate::tasks::TaskStatus::Completed,
@@ -872,6 +1069,9 @@ pub fn spawn_full_scan(
             }
         }
         crate::tasks::emit_tasks(&app, &tasks);
+        if !scan_run_end(&library_id) {
+            break;
+        }
     });
 }
 
@@ -1024,6 +1224,90 @@ pub fn search_library(conn: &Connection, library_id: &str, query: &str, limit: i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn office_lock_and_system_files_are_temp() {
+        for n in ["~$蓝图设计阶段交付物.xlsx", "~$报告.docx", "~WRL0005.tmp", "Thumbs.db", "desktop.ini", "DESKTOP.INI"] {
+            assert!(is_system_temp_file(n), "{n}");
+        }
+        for n in ["报告.docx", "~备注.md", "data.tmp", "thumbs.db.md", "蓝图~$.xlsx"] {
+            assert!(!is_system_temp_file(n), "{n}");
+        }
+    }
+
+    fn write_docx(path: &Path, body: &str) {
+        use std::io::Write;
+        let f = std::fs::File::create(path).unwrap();
+        let mut z = zip::ZipWriter::new(f);
+        let opt = zip::write::SimpleFileOptions::default();
+        z.start_file("[Content_Types].xml", opt).unwrap();
+        z.write_all(br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#).unwrap();
+        z.start_file("word/document.xml", opt).unwrap();
+        let xml = format!(r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{body}</w:t></w:r></w:p></w:body></w:document>"#);
+        z.write_all(xml.as_bytes()).unwrap();
+        z.finish().unwrap();
+    }
+
+    /// Office 正文应进入全文索引：此前扫描只提取文本类格式，Word / Excel / PPT 内容搜不到
+    #[test]
+    fn office_body_text_is_indexed_and_backfilled_for_existing_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        write_docx(&dir.path().join("方案.docx"), "域控制器迁移与站点复制拓扑");
+        let conn = memory_db();
+        let meta = create_library(&conn, CreateLibraryRequest {
+            root_path: dir.path().to_string_lossy().into(),
+            name: Some("Office 索引".into()),
+            exclude_dirs: vec![],
+            full_text_index: true,
+            ocr_enabled: false,
+            portable_meta: false,
+        }).unwrap();
+        scan_library_with(&conn, &meta.id, dir.path(), &[], ScanOptions::default()).unwrap();
+        let hits = search_library(&conn, &meta.id, "域控制器", 10).unwrap();
+        assert!(hits.iter().any(|h| h.entry.name == "方案.docx"), "Word 正文应可被搜索命中");
+
+        // 模拟旧版本留下的库：文件行在、但没有提取记录（旧扫描不提取 Office）；文件本身未变化
+        conn.execute("DELETE FROM search_fts", []).unwrap();
+        conn.execute("DELETE FROM extracted_content", []).unwrap();
+        assert!(search_library(&conn, &meta.id, "域控制器", 10).unwrap().iter().all(|h| h.entry.name != "方案.docx"));
+        scan_library_with(&conn, &meta.id, dir.path(), &[], ScanOptions::default()).unwrap();
+        let hits = search_library(&conn, &meta.id, "站点复制", 10).unwrap();
+        assert!(hits.iter().any(|h| h.entry.name == "方案.docx"), "未提取过的 Office 文件应在下次扫描时补提");
+
+        // 已有提取记录且未变化：再次扫描不重复提取（提取记录保持不变）
+        let before: String = conn.query_row("SELECT extractor_version || status FROM extracted_content", [], |r| r.get(0)).unwrap();
+        scan_library_with(&conn, &meta.id, dir.path(), &[], ScanOptions::default()).unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM extracted_content", [], |r| r.get(0)).unwrap();
+        let after: String = conn.query_row("SELECT extractor_version || status FROM extracted_content", [], |r| r.get(0)).unwrap();
+        assert_eq!((n, before), (1, after));
+    }
+
+    #[test]
+    fn truncate_utf8_respects_char_boundaries() {
+        assert_eq!(truncate_utf8("域控制器".to_string(), 7), "域控"); // 每字 3 字节
+        assert_eq!(truncate_utf8("abc".to_string(), 10), "abc");
+    }
+
+    /// 同一文档库的并发扫描请求被合并：进行中的请求只标记补跑，结束时补跑一轮后才注销
+    #[test]
+    fn concurrent_scan_requests_are_coalesced_with_one_rerun() {
+        let id = "coalesce-test-library";
+        assert!(scan_run_begin(id), "首个请求立即扫描");
+        assert!(!scan_run_begin(id), "扫描中的请求不并行启动");
+        assert!(!scan_run_begin(id), "多个请求合并为一次补跑");
+        assert!(scan_run_end(id), "第一轮结束：因期间有请求，再扫一轮");
+        assert!(!scan_run_end(id), "补跑结束：无新请求，注销");
+        assert!(scan_run_begin(id), "注销后新的请求重新立即扫描");
+        assert!(!scan_run_end(id));
+    }
+
+    #[test]
+    fn last_full_scan_is_recorded_per_library() {
+        assert!(last_full_scan("never-scanned-library").is_none());
+        let before = Instant::now();
+        mark_full_scan("scanned-library");
+        assert!(last_full_scan("scanned-library").is_some_and(|t| t >= before));
+    }
 
     fn memory_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -1417,3 +1701,5 @@ mod tests {
         assert_eq!(extracted, 2);
     }
 }
+
+

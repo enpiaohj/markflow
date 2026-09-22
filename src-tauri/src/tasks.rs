@@ -2,6 +2,7 @@
 //! 统一登记扫描、自动重扫等后台任务，提供进度、取消与历史查询。
 //! v0.1 任务历史保存在内存（上限 100 条），任务持久化（tasks 表）随 OCR/AI/导出类任务一起交付。
 
+use crate::lockext::LockExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,7 +67,7 @@ impl TaskManager {
     pub fn begin(&self, kind: TaskKind, title: &str) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         inner.tasks.insert(
             0,
             TaskInfo {
@@ -88,13 +89,13 @@ impl TaskManager {
     /// 登记任务的取消旗标；扫描循环周期性检查。
     pub fn attach_cancel(&self, id: &str) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
-        self.0.lock().unwrap().cancels.insert(id.to_string(), flag.clone());
+        self.0.lock_safe().cancels.insert(id.to_string(), flag.clone());
         flag
     }
 
     /// 更新已处理条目数。
     pub fn progress(&self, id: &str, processed: u64) {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         if let Some(task) = inner.tasks.iter_mut().find(|t| t.id == id) {
             task.processed = processed;
             task.updated_at = now_ms();
@@ -103,7 +104,7 @@ impl TaskManager {
 
     /// 结束任务（completed / failed / canceled）。
     pub fn finish(&self, id: &str, status: TaskStatus, detail: Option<String>, error: Option<String>) {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         inner.cancels.remove(id);
         if let Some(task) = inner.tasks.iter_mut().find(|t| t.id == id) {
             task.status = status;
@@ -115,7 +116,7 @@ impl TaskManager {
 
     /// 请求取消；返回是否存在该任务。
     pub fn cancel(&self, id: &str) -> bool {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         let flagged = if let Some(flag) = inner.cancels.get(id) {
             flag.store(true, Ordering::Relaxed);
             true
@@ -131,12 +132,12 @@ impl TaskManager {
     }
 
     pub fn list(&self) -> Vec<TaskInfo> {
-        self.0.lock().unwrap().tasks.clone()
+        self.0.lock_safe().tasks.clone()
     }
 
     /// 清除非运行中的任务。
     pub fn clear_finished(&self) -> usize {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.lock_safe();
         let before = inner.tasks.len();
         inner.tasks.retain(|t| t.status == TaskStatus::Running);
         before - inner.tasks.len()

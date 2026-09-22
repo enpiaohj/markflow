@@ -26,6 +26,8 @@ pub const FORMATS: &[FormatDef] = &[
             "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "kt", "kts",
             "swift", "c", "h", "cpp", "hpp", "cc", "cs", "rb", "php", "sh", "bash", "zsh",
             "ps1", "bat", "cmd", "sql", "lua", "dart", "scala", "r", "vue", "svelte", "zig",
+            // 编辑器已支持高亮、此前被归为「其他」的扩展名（网页 / 样式表 / 脚本变体）
+            "html", "htm", "css", "scss", "less", "mts", "cts", "pyi", "pyw", "psm1", "psd1", "csx",
         ],
     },
     FormatDef {
@@ -41,7 +43,7 @@ pub const FORMATS: &[FormatDef] = &[
     FormatDef {
         id: "xml",
         label: "XML",
-        extensions: &["xml", "xaml", "xhtml", "plist"],
+        extensions: &["xml", "xaml", "xhtml", "plist", "xsd", "xsl", "xslt", "csproj", "vbproj", "props", "targets", "config", "resx"],
     },
     FormatDef {
         id: "config",
@@ -148,6 +150,18 @@ pub fn format_label(format_id: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 编辑器已能高亮的常见扩展名不应落入「其他」（否则既不能应用内编辑，也不进全文索引）
+    #[test]
+    fn editor_supported_extensions_are_recognized() {
+        for (name, want) in [
+            ("index.html", "code"), ("page.htm", "code"), ("site.css", "code"), ("a.scss", "code"),
+            ("b.less", "code"), ("m.mts", "code"), ("stub.pyi", "code"), ("mod.psm1", "code"),
+            ("app.csproj", "xml"), ("web.config", "xml"), ("schema.xsd", "xml"), ("Directory.Build.props", "xml"),
+        ] {
+            assert_eq!(detect_format(name), want, "{name}");
+        }
+    }
 
     #[test]
     fn detect_common_formats() {

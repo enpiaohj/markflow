@@ -10,6 +10,7 @@ mod format;
 mod fsops;
 mod images;
 mod library;
+mod lockext;
 mod ocr;
 mod office;
 mod officepdf;
@@ -25,6 +26,7 @@ mod watch;
 mod xlsxview;
 
 use library::{AppState, CreateLibraryRequest};
+use lockext::LockExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -33,7 +35,7 @@ use watch::WatchState;
 /// 打开任意文件：定位所属文档库，或进入单文件模式。
 #[tauri::command]
 fn open_file_path(state: State<'_, AppState>, path: String) -> Result<openfile::OpenTarget, String> {
-    let conn = state.0.lock().unwrap();
+    let conn = state.0.lock_safe();
     let target = openfile::resolve(&conn, &path)?;
     openfile::push_recent(&conn, &openfile::normalize(std::path::Path::new(&path)));
     Ok(target)
@@ -42,13 +44,13 @@ fn open_file_path(state: State<'_, AppState>, path: String) -> Result<openfile::
 /// 取走启动参数 / 二次启动传来的待打开文件路径（前端就绪后调用一次）。
 #[tauri::command]
 fn take_pending_open_paths(pending: State<'_, openfile::PendingOpen>) -> Vec<String> {
-    std::mem::take(&mut *pending.0.lock().unwrap())
+    std::mem::take(&mut *pending.0.lock_safe())
 }
 
 /// 最近打开的文件（仅保留仍存在的）。
 #[tauri::command]
 fn list_recent_files(state: State<'_, AppState>) -> Vec<openfile::RecentFile> {
-    openfile::read_recent(&state.0.lock().unwrap())
+    openfile::read_recent(&state.0.lock_safe())
         .into_iter()
         .filter(|r| std::path::Path::new(&r.path).is_file())
         .collect()
@@ -61,7 +63,7 @@ fn stat_file_mtime(
     library_id: String,
     relative_path: String,
 ) -> Result<i64, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     Ok(library::file_mtime(&std::path::Path::new(&root).join(relative_path)))
 }
 
@@ -83,7 +85,7 @@ fn set_close_to_tray(
     enabled: bool,
 ) -> Result<(), String> {
     shell::ensure_tray(&app, enabled)?;
-    shell::write_close_to_tray(&state.0.lock().unwrap(), enabled)?;
+    shell::write_close_to_tray(&state.0.lock_safe(), enabled)?;
     shell.close_to_tray.store(enabled, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
@@ -109,15 +111,16 @@ fn app_info() -> serde_json::Value {
     })
 }
 
-/// 提取本机（资源管理器）标准文件类型图标：格式 id → PNG data URL；失败返回空表（前端用内置图标）。
+/// 按扩展名取本机（资源管理器）标准文件图标：扩展名（小写、无点；`<folder>` 为文件夹）→ PNG data URL。
+/// 系统没有图标的扩展名不出现在结果中，前端回退内置图标。
 #[tauri::command]
-fn get_file_type_icons() -> HashMap<String, String> {
-    sysicon::cached()
+fn get_file_icons(keys: Vec<String>) -> HashMap<String, String> {
+    sysicon::icons_for(keys)
 }
 
 #[tauri::command]
 fn list_libraries(state: State<'_, AppState>) -> Result<Vec<library::LibraryMeta>, String> {
-    library::list_libraries(&state.0.lock().unwrap())
+    library::list_libraries(&state.0.lock_safe())
 }
 
 #[tauri::command]
@@ -133,7 +136,7 @@ fn create_library(
     tasks: State<'_, tasks::TaskManager>,
     request: CreateLibraryRequest,
 ) -> Result<library::LibraryMeta, String> {
-    let meta = library::create_library(&state.0.lock().unwrap(), request)?;
+    let meta = library::create_library(&state.0.lock_safe(), request)?;
     let exclude = library::excludes_from(&meta.settings);
     library::spawn_full_scan(
         app,
@@ -149,13 +152,13 @@ fn create_library(
 
 #[tauri::command]
 fn open_library(state: State<'_, AppState>, id: String) -> Result<library::LibraryMeta, String> {
-    library::open_library(&state.0.lock().unwrap(), &id)
+    library::open_library(&state.0.lock_safe(), &id)
 }
 
 /// 从 MarkFlow 移除文档库索引记录（不删除磁盘上的任何原文件）。
 #[tauri::command]
 fn remove_library(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    library::remove_library(&state.0.lock().unwrap(), &id)
+    library::remove_library(&state.0.lock_safe(), &id)
 }
 
 /// 列出某目录直接子项；`relative_path` 传 "" 表示库根目录。
@@ -165,7 +168,7 @@ fn list_children(
     library_id: String,
     relative_path: String,
 ) -> Result<Vec<library::FileEntryDto>, String> {
-    library::list_children(&state.0.lock().unwrap(), &library_id, &relative_path)
+    library::list_children(&state.0.lock_safe(), &library_id, &relative_path)
 }
 
 #[tauri::command]
@@ -174,7 +177,7 @@ fn get_file_detail(
     library_id: String,
     relative_path: String,
 ) -> Result<library::FileEntryDto, String> {
-    library::get_file_detail(&state.0.lock().unwrap(), &library_id, &relative_path)
+    library::get_file_detail(&state.0.lock_safe(), &library_id, &relative_path)
 }
 
 /// 在当前文档库内搜索（文件名 + 正文）。
@@ -186,7 +189,7 @@ fn search_library(
     limit: Option<i64>,
 ) -> Result<Vec<library::SearchHitDto>, String> {
     library::search_library(
-        &state.0.lock().unwrap(),
+        &state.0.lock_safe(),
         &library_id,
         &query,
         limit.unwrap_or(50),
@@ -201,7 +204,7 @@ fn set_watched_libraries(
     watch: State<'_, WatchState>,
     library_ids: Vec<String>,
 ) -> Result<(), String> {
-    watch::sync_watching(&app, &state.0.lock().unwrap(), &watch.0, library_ids)
+    watch::sync_watching(&app, &state.0.lock_safe(), &watch.0, library_ids)
 }
 
 #[tauri::command]
@@ -239,7 +242,7 @@ fn get_office_preview(
     library_id: String,
     relative_path: String,
 ) -> Result<office::OfficePreview, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
     let format = crate::format::detect_format(
         relative_path.rsplit('/').next().unwrap_or(&relative_path),
@@ -255,7 +258,7 @@ fn import_image_asset(
     parent_dir: String,
     src_path: String,
 ) -> Result<String, String> {
-    images::import_image(&state.0.lock().unwrap(), &library_id, &parent_dir, &src_path)
+    images::import_image(&state.0.lock_safe(), &library_id, &parent_dir, &src_path)
 }
 
 /// 保存粘贴的图片字节（二进制 IPC：请求体为原始字节，参数放在请求头，中文经 URL 编码）。
@@ -275,7 +278,7 @@ fn save_image_bytes(state: State<'_, AppState>, request: tauri::ipc::Request<'_>
     // 文档在库根目录时 x-parent-dir 为空串，空值请求头可能被丢弃，缺省按空处理
     let parent_dir = header("x-parent-dir").unwrap_or_default();
     let (library_id, stem, ext) = (header("x-library-id")?, header("x-stem")?, header("x-ext")?);
-    let conn = state.0.lock().unwrap();
+    let conn = state.0.lock_safe();
     let meta = library::get_library(&conn, &library_id)?;
     images::save_image(&conn, &meta, &parent_dir, &stem, &ext, bytes)
 }
@@ -322,7 +325,7 @@ fn read_file_bytes(
     library_id: String,
     relative_path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let conn = state.0.lock().unwrap();
+    let conn = state.0.lock_safe();
     let registered: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0)",
@@ -362,7 +365,7 @@ fn open_path_in_system(
     library_id: String,
     relative_path: String,
 ) -> Result<(), String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
 }
@@ -376,7 +379,7 @@ fn open_with_external(
     relative_path: String,
     tool: String,
 ) -> Result<(), String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let target = external_tools::resolve_target(&root, &relative_path)?;
     external_tools::launch(external_tools::Tool::parse(&tool)?, &target)
 }
@@ -394,7 +397,7 @@ fn list_library_files(
     library_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<library::FileEntryDto>, String> {
-    library::list_all_files(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(500))
+    library::list_all_files(&state.0.lock_safe(), &library_id, limit.unwrap_or(500))
 }
 
 /// LibreOffice 是否可用（轻量探测，不启动任何程序；Office 预览用）。
@@ -410,7 +413,7 @@ fn record_recent_open(
     library_id: String,
     relative_path: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().unwrap();
+    let conn = state.0.lock_safe();
     let root = library::get_library(&conn, &library_id)?.root_path;
     let abs = std::path::Path::new(&root).join(&relative_path);
     if abs.is_file() {
@@ -450,7 +453,7 @@ fn convert_docx_to_markdown(
         return Err("未检测到 Pandoc 组件，请在设置中查看组件状态并安装后重试。".into());
     };
     let (root, format) = {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let meta = library::get_library(&conn, &library_id)?;
         let format: String = conn
             .query_row(
@@ -488,7 +491,7 @@ fn convert_docx_to_markdown(
 
     // 副本先同步登记进索引：前端转换完成后立刻打开它，此时后台全量重扫多半还没跑完，
     // 不登记会得到「文件不存在于文档库索引」而打不开
-    let meta = library::get_library(&state.0.lock().unwrap(), &library_id)?;
+    let meta = library::get_library(&state.0.lock_safe(), &library_id)?;
     let md_rel = match relative_path.rsplit_once('/') {
         Some((parent, _)) => format!("{parent}/{}", out.md_relative_path),
         None => out.md_relative_path.clone(),
@@ -496,9 +499,9 @@ fn convert_docx_to_markdown(
     if openfile::is_adhoc_library(&meta) {
         // 单文件模式：随后的全量重扫只保留 settings.files 白名单里的文件，
         // 不登记的话副本会被 ensure_indexed 插入索引、又立刻被这次重扫当成「已消失」删掉
-        openfile::register_adhoc_file(&state.0.lock().unwrap(), &library_id, &md_rel)?;
+        openfile::register_adhoc_file(&state.0.lock_safe(), &library_id, &md_rel)?;
     }
-    openfile::ensure_indexed(&state.0.lock().unwrap(), &meta, &md_rel)?;
+    openfile::ensure_indexed(&state.0.lock_safe(), &meta, &md_rel)?;
 
     // 副本入库：全量重扫（复用任务中心的扫描任务与事件；附件等其余文件由它收录）
     library::spawn_full_scan(
@@ -664,7 +667,7 @@ fn import_file(
     let Some(pandoc) = component_manager::detect_pandoc() else {
         return Err("未检测到 Pandoc 组件，DOCX/HTML 导入转 Markdown 需要该组件；其他格式导入不受影响。".into());
     };
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let src = PathBuf::from(&source_path);
     if !src.is_file() {
         return Err(format!("源文件不存在: {source_path}"));
@@ -721,7 +724,7 @@ fn import_file(
     tasks::emit_tasks(&app, &tasks);
 
     let imported_name = import_result?;
-    let meta = library::get_library(&state.0.lock().unwrap(), &library_id)?;
+    let meta = library::get_library(&state.0.lock_safe(), &library_id)?;
     library::spawn_full_scan(
         app,
         state.inner().clone(),
@@ -737,7 +740,7 @@ fn import_file(
 /// AI Provider 列表（不含密钥）。
 #[tauri::command]
 fn ai_list_providers(state: State<'_, AppState>) -> Vec<ai::ProviderConfig> {
-    ai::list_providers(&state.0.lock().unwrap())
+    ai::list_providers(&state.0.lock_safe())
 }
 
 /// 保存 Provider：API Key 写入系统凭据库（不落库、不回传前端）。
@@ -746,12 +749,12 @@ fn ai_save_provider(
     state: State<'_, AppState>,
     request: ai::ProviderSaveRequest,
 ) -> Result<ai::ProviderConfig, String> {
-    ai::save_provider(&state.0.lock().unwrap(), request)
+    ai::save_provider(&state.0.lock_safe(), request)
 }
 
 #[tauri::command]
 fn ai_delete_provider(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    ai::delete_provider(&state.0.lock().unwrap(), &id)
+    ai::delete_provider(&state.0.lock_safe(), &id)
 }
 
 /// 连通性测试：区分网络 / 认证 / 地址 / 服务端问题。
@@ -761,7 +764,7 @@ async fn ai_test_provider(
     id: String,
 ) -> Result<ai::TestResult, String> {
     let (base_url, key) = {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let provider = ai::read_providers(&conn)
             .into_iter()
             .find(|p| p.id == id)
@@ -779,7 +782,7 @@ fn ai_prepare_context(
     library_id: String,
     context_paths: Vec<String>,
 ) -> Result<ai::ContextPreview, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     ai::prepare_context_with(&root, &context_paths)
 }
 
@@ -791,7 +794,7 @@ async fn ai_chat(
     request: ai::AiChatRequest,
 ) -> Result<ai::ChatOutcome, String> {
     let (root, providers) = {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let all = ai::read_providers(&conn);
         let primary = all
             .iter()
@@ -823,7 +826,7 @@ fn ai_update_provider(
     id: String,
     request: ai::ProviderSaveRequest,
 ) -> Result<ai::ProviderConfig, String> {
-    ai::update_provider(&state.0.lock().unwrap(), &id, request)
+    ai::update_provider(&state.0.lock_safe(), &id, request)
 }
 
 /// 文档质量检查（Markdown：标题层级 / 断链 / 空章节 / 敏感信息）。
@@ -833,7 +836,7 @@ fn check_document(
     library_id: String,
     relative_path: String,
 ) -> Result<Vec<checks::Issue>, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
     let content = textenc::decode_lossy_for_index(&std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?);
     let document_dir = path
@@ -854,7 +857,7 @@ fn create_text_file(
     file_name: String,
     content: String,
 ) -> Result<editor::SaveOutcome, String> {
-    let outcome = editor::create_text_file(&state.0.lock().unwrap(), &library_id, &parent_dir, &file_name, &content);
+    let outcome = editor::create_text_file(&state.0.lock_safe(), &library_id, &parent_dir, &file_name, &content);
     if outcome.is_ok() {
         let _ = app.emit(
             "file:saved",
@@ -871,7 +874,7 @@ fn delivery_precheck(
     library_id: String,
     sources: Vec<String>,
 ) -> Result<delivery::PrecheckReport, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     delivery::precheck(std::path::Path::new(&root), &sources)
 }
 
@@ -893,7 +896,7 @@ fn delivery_start(
         return Err("请至少选择一种交付格式".into());
     }
     // 服务端强制预检：错误项直接阻止（交付门禁）
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let report = delivery::precheck(std::path::Path::new(&root), &sources)?;
     if !report.can_proceed {
         return Err("预检存在错误项（如敏感信息或质量错误），已按交付门禁阻止。请在来源侧修复后重试。".into());
@@ -914,7 +917,7 @@ fn delivery_start(
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0),
     };
-    delivery::insert_record(&state.0.lock().unwrap(), &record)?;
+    delivery::insert_record(&state.0.lock_safe(), &record)?;
 
     let task_id = tasks.begin(tasks::TaskKind::Scan, "正式交付 · 多格式生成");
     tasks::emit_tasks(&app, &tasks);
@@ -935,7 +938,7 @@ fn delivery_start(
             Ok(outcome) => {
                 let dir = outcome.output_dir.to_string_lossy().to_string();
                 let _ = delivery::update_record(
-                    &db.lock().unwrap(),
+                    &db.lock_safe(),
                     &record_id,
                     "completed",
                     None,
@@ -950,7 +953,7 @@ fn delivery_start(
                 );
             }
             Err(err) => {
-                let _ = delivery::update_record(&db.lock().unwrap(), &record_id, "failed", Some(err), None, &[]);
+                let _ = delivery::update_record(&db.lock_safe(), &record_id, "failed", Some(err), None, &[]);
                 tasks2.finish(&task_id, tasks::TaskStatus::Failed, None, Some(err.clone()));
             }
         }
@@ -969,7 +972,7 @@ fn list_delivery_history(
     library_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<delivery::DeliveryRecord>, String> {
-    delivery::list_records(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(50))
+    delivery::list_records(&state.0.lock_safe(), &library_id, limit.unwrap_or(50))
 }
 
 fn library_file_path(
@@ -977,7 +980,7 @@ fn library_file_path(
     library_id: &str,
     relative_path: &str,
 ) -> Result<PathBuf, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), library_id)?.root_path;
     Ok(PathBuf::from(root).join(relative_path))
 }
 
@@ -1005,7 +1008,7 @@ async fn ocr_file(
     relative_path: String,
 ) -> Result<ocr::OcrResult, String> {
     let (root, file_id, name): (String, i64, String) = {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         let root = library::get_library(&conn, &library_id)?.root_path;
         let (file_id, name): (i64, String) = conn
             .query_row(
@@ -1025,7 +1028,7 @@ async fn ocr_file(
         .await
         .map_err(|e| format!("OCR 线程失败: {e}"))??;
     {
-        let conn = state.0.lock().unwrap();
+        let conn = state.0.lock_safe();
         library::clear_extraction(&conn, file_id).map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO extracted_content (file_id, extractor_version, status, text) VALUES (?1, 'ocr-win', 'ok', ?2)",
@@ -1050,7 +1053,7 @@ fn add_annotation(
     quote: String,
     body: String,
 ) -> Result<annotations::Annotation, String> {
-    annotations::add(&state.0.lock().unwrap(), &library_id, &relative_path, &quote, &body)
+    annotations::add(&state.0.lock_safe(), &library_id, &relative_path, &quote, &body)
 }
 
 #[tauri::command]
@@ -1059,27 +1062,36 @@ fn list_annotations(
     library_id: String,
     relative_path: String,
 ) -> Result<Vec<annotations::Annotation>, String> {
-    annotations::list_for_file(&state.0.lock().unwrap(), &library_id, &relative_path)
+    annotations::list_for_file(&state.0.lock_safe(), &library_id, &relative_path)
 }
 
 #[tauri::command]
 fn set_annotation_resolved(state: State<'_, AppState>, id: i64, resolved: bool) -> Result<(), String> {
-    annotations::set_resolved(&state.0.lock().unwrap(), id, resolved)
+    annotations::set_resolved(&state.0.lock_safe(), id, resolved)
 }
 
 #[tauri::command]
 fn delete_annotation(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    annotations::delete(&state.0.lock().unwrap(), id)
+    annotations::delete(&state.0.lock_safe(), id)
 }
 
-/// 手动触发指定文档库的全量重扫（如重新打开库时刷新索引）。
+/// 激活 / 重新打开文档库时刷新索引。
+/// 库已在文件监听中、且监听开始后近期（10 分钟内）完成过全量扫描时跳过——期间的磁盘变化已由监听实时同步，
+/// 大文档库来回切换不再反复遍历整个目录树；超过时限仍补扫一次，作为监听遗漏事件时的兜底。
 #[tauri::command]
 fn rescan_library(
     app: AppHandle,
     state: State<'_, AppState>,
     tasks: State<'_, tasks::TaskManager>,
+    watch: State<'_, WatchState>,
     library_id: String,
 ) -> Result<(), String> {
+    const FRESH: std::time::Duration = std::time::Duration::from_secs(600);
+    if let (Some(since), Some(last)) = (watch::watching_since(&watch.0, &library_id), library::last_full_scan(&library_id)) {
+        if last >= since && last.elapsed() < FRESH {
+            return Ok(());
+        }
+    }
     rescan_library_bg(&app, &state, &tasks, &library_id)
 }
 
@@ -1093,7 +1105,7 @@ fn create_library_directory(
     parent_dir: String,
     name: String,
 ) -> Result<(), String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     fsops::create_directory(&root, &parent_dir, &name)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(())
@@ -1109,9 +1121,9 @@ fn rename_library_entry(
     relative_path: String,
     new_name: String,
 ) -> Result<String, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let new_rel = fsops::rename_entry(&root, &relative_path, &new_name)?;
-    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
+    library::migrate_path_refs(&state.0.lock_safe(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -1126,9 +1138,9 @@ fn move_library_entry(
     relative_path: String,
     target_dir: String,
 ) -> Result<String, String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     let new_rel = fsops::move_entry(&root, &relative_path, &target_dir)?;
-    library::migrate_path_refs(&state.0.lock().unwrap(), &library_id, &relative_path, &new_rel)?;
+    library::migrate_path_refs(&state.0.lock_safe(), &library_id, &relative_path, &new_rel)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(new_rel)
 }
@@ -1142,7 +1154,7 @@ fn delete_library_entry(
     library_id: String,
     relative_path: String,
 ) -> Result<(), String> {
-    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let root = library::get_library(&state.0.lock_safe(), &library_id)?.root_path;
     fsops::delete_entry(&root, &relative_path)?;
     rescan_library_bg(&app, &state, &tasks, &library_id)?;
     Ok(())
@@ -1151,7 +1163,7 @@ fn delete_library_entry(
 /// 列出库内全部目录（移动目标选择用）。
 #[tauri::command]
 fn list_library_dirs(state: State<'_, AppState>, library_id: String) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().unwrap();
+    let conn = state.0.lock_safe();
     let mut stmt = conn
         .prepare(
             "SELECT relative_path FROM files WHERE library_id = ?1 AND is_dir = 1
@@ -1171,7 +1183,7 @@ fn rescan_library_bg(
     tasks: &State<'_, tasks::TaskManager>,
     library_id: &str,
 ) -> Result<(), String> {
-    let meta = library::get_library(&state.0.lock().unwrap(), library_id)?;
+    let meta = library::get_library(&state.0.lock_safe(), library_id)?;
     library::spawn_full_scan(
         app.clone(),
         state.inner().clone(),
@@ -1193,7 +1205,7 @@ fn read_text_file(
     max_bytes: Option<u64>,
 ) -> Result<editor::TextFileContent, String> {
     editor::read_text_file_with(
-        &state.0.lock().unwrap(),
+        &state.0.lock_safe(),
         &library_id,
         &relative_path,
         max_bytes.unwrap_or(editor::DEFAULT_MAX_EDIT_BYTES),
@@ -1214,7 +1226,7 @@ fn save_text_file(
     eol_override: Option<String>,
 ) -> Result<editor::SaveOutcome, String> {
     let outcome = editor::save_text_file_as(
-        &state.0.lock().unwrap(),
+        &state.0.lock_safe(),
         &library_id,
         &relative_path,
         &content,
@@ -1241,7 +1253,7 @@ fn list_file_versions(
     library_id: String,
     relative_path: String,
 ) -> Result<Vec<editor::VersionInfo>, String> {
-    editor::list_file_versions(&state.0.lock().unwrap(), &library_id, &relative_path)
+    editor::list_file_versions(&state.0.lock_safe(), &library_id, &relative_path)
 }
 
 #[tauri::command]
@@ -1250,7 +1262,7 @@ fn list_recent_versions(
     library_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<editor::VersionInfo>, String> {
-    editor::list_recent_versions(&state.0.lock().unwrap(), &library_id, limit.unwrap_or(100))
+    editor::list_recent_versions(&state.0.lock_safe(), &library_id, limit.unwrap_or(100))
 }
 
 /// 恢复历史版本（恢复前自动快照当前内容）。完成后发送 `file:saved`。
@@ -1262,7 +1274,7 @@ fn restore_file_version(
     relative_path: String,
     version_id: i64,
 ) -> Result<editor::SaveOutcome, String> {
-    let outcome = editor::restore_file_version(&state.0.lock().unwrap(), &library_id, &relative_path, version_id);
+    let outcome = editor::restore_file_version(&state.0.lock_safe(), &library_id, &relative_path, version_id);
     if outcome.is_ok() {
         let _ = app.emit(
             "file:saved",
@@ -1299,7 +1311,7 @@ pub fn run() {
             let paths = openfile::paths_from_args(args.into_iter().skip(1));
             if !paths.is_empty() {
                 if let Some(pending) = app.try_state::<openfile::PendingOpen>() {
-                    pending.0.lock().unwrap().extend(paths.clone());
+                    pending.0.lock_safe().extend(paths.clone());
                 }
                 let _ = app.emit("open-paths", paths);
             }
@@ -1314,7 +1326,7 @@ pub fn run() {
             app.manage(tasks::TaskManager::default());
             // 外壳偏好：读取「关闭时最小化到通知区域」，需要时创建通知区域图标；
             // 开机自动拉起（--autostart）时按偏好隐藏到通知区域或最小化
-            let close_to_tray = shell::read_close_to_tray(&app.state::<AppState>().0.lock().unwrap());
+            let close_to_tray = shell::read_close_to_tray(&app.state::<AppState>().0.lock_safe());
             app.manage(shell::ShellState::new(close_to_tray));
             if close_to_tray {
                 let _ = shell::ensure_tray(app.handle(), true);
@@ -1335,7 +1347,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
-            get_file_type_icons,
+            get_file_icons,
             import_image_asset,
             open_with_external,
             vscode_available,

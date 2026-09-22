@@ -2250,6 +2250,7 @@ dependencies = [
  "futures-util",
  "keyring",
  "notify",
+ "png 0.17.16",
  "regex",
  "reqwest 0.12.28",
  "roxmltree",

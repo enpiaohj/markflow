@@ -3,13 +3,14 @@
 //! 策略：notify 递归监听工作区中所有已打开的库（每库一个 watcher） → 事件去抖（1.2 秒静默）→ 全量重扫 → `library:changed` 事件。
 //! 文件被 Excel 等程序占用时扫描逐条跳过（见 library.rs），等待写入稳定后自然恢复。
 
+use crate::lockext::LockExt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::library::{self, AppState};
@@ -24,12 +25,23 @@ pub struct WatchSession {
     #[allow(dead_code)] // 字段仅用于标识与调试，drop watcher 本身即停止监听
     pub library_id: String,
     pub cancel: std::sync::Arc<AtomicBool>,
+    /// 监听开始时间：此后的磁盘变化都会被监听捕获并触发重扫
+    pub started: Instant,
     /// drop 即关闭监听并断开通知通道，防抖线程随之退出
     _watcher: RecommendedWatcher,
 }
 
-/// 判断路径是否位于排除目录/隐藏目录内（过滤构建产物噪声）。
+/// 该库正在被监听时返回监听开始时间。
+pub fn watching_since(slots: &Mutex<HashMap<String, WatchSession>>, library_id: &str) -> Option<Instant> {
+    slots.lock_safe().get(library_id).map(|s| s.started)
+}
+
+/// 判断路径是否位于排除目录/隐藏目录内（过滤构建产物噪声），或是 Office 锁文件等系统临时文件
+/// （在 Word / Excel 中打开、关闭文档都会创建删除 `~$` 锁文件，不应触发整库重扫）。
 fn is_ignored_path(path: &Path) -> bool {
+    if path.file_name().is_some_and(|n| library::is_system_temp_file(&n.to_string_lossy())) {
+        return true;
+    }
     for comp in path.components() {
         let name = comp.as_os_str().to_string_lossy();
         if name.len() > 1 && name.starts_with('.') {
@@ -54,7 +66,7 @@ pub fn sync_watching(
     library_ids: Vec<String>,
 ) -> Result<(), String> {
     {
-        let mut map = slots.lock().unwrap();
+        let mut map = slots.lock_safe();
         let stale: Vec<String> = map
             .keys()
             .filter(|id| !library_ids.contains(id))
@@ -68,7 +80,7 @@ pub fn sync_watching(
     }
     let mut errors = Vec::new();
     for id in library_ids {
-        if slots.lock().unwrap().contains_key(&id) {
+        if slots.lock_safe().contains_key(&id) {
             continue;
         }
         if let Err(e) = start_watching(app, conn, slots, id) {
@@ -121,6 +133,7 @@ fn start_watching(
     let session = WatchSession {
         library_id: library_id.clone(),
         cancel: cancel.clone(),
+        started: Instant::now(),
         _watcher: watcher,
     };
 
@@ -144,7 +157,7 @@ fn start_watching(
         }
     });
 
-    slots.lock().unwrap().insert(session.library_id.clone(), session);
+    slots.lock_safe().insert(session.library_id.clone(), session);
     Ok(())
 }
 
@@ -152,7 +165,7 @@ fn start_watching(
 fn rescan_current(app: &AppHandle, library_id: &str) {
     let state = app.state::<AppState>().inner().clone();
     let tasks = app.state::<crate::tasks::TaskManager>();
-    let Ok(meta) = library::get_library(&state.0.lock().unwrap(), library_id) else {
+    let Ok(meta) = library::get_library(&state.0.lock_safe(), library_id) else {
         return;
     };
     let exclude = library::excludes_from(&meta.settings);
@@ -177,6 +190,7 @@ fn rescan_current(app: &AppHandle, library_id: &str) {
         library::ScanOptions { cancel: Some(&cancel), on_progress: Some(&progress) },
     ) {
         Ok(outcome) => {
+            library::mark_full_scan(library_id);
             mgr.finish(
                 &task_id,
                 crate::tasks::TaskStatus::Completed,
@@ -217,5 +231,7 @@ mod tests {
         assert!(is_ignored_path(Path::new("D:/lib/target/debug/app.exe")));
         assert!(!is_ignored_path(Path::new("D:/lib/03_技术方案/设计.md")));
         assert!(!is_ignored_path(Path::new("D:/lib/README.md")));
+        assert!(is_ignored_path(Path::new("D:/lib/11-交付物/~$蓝图.xlsx")), "Office 锁文件不触发重扫");
+        assert!(is_ignored_path(Path::new("D:/lib/~WRL0001.tmp")));
     }
 }
