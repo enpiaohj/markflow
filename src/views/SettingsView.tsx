@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { SettingGroup, SettingRow, Segmented, Toggle } from "../components/settings/ui";
 import { useDialog } from "../components/DialogContext";
+import { useLibrary } from "../components/LibraryContext";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import {
@@ -95,8 +96,16 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
 /** 「设置」页：左侧分类 + 右侧内容；每项「名称 + 说明 | 控件」，改动立即生效；顶部搜索。 */
 export default function SettingsView() {
   const dialog = useDialog();
+  const { settingsSection, clearSettingsSection } = useLibrary();
   const [section, setSection] = useState<SectionId>("general");
   const [query, setQuery] = useState("");
+
+  // 外部请求直接定位到某个分类（如帮助菜单「关于」），消费后清空，不影响后续正常导航
+  useEffect(() => {
+    if (!settingsSection) return;
+    setSection(settingsSection as SectionId);
+    clearSettingsSection();
+  }, [settingsSection, clearSettingsSection]);
 
   // ---- 偏好 ----
   const [theme, setThemeState] = useState<ThemePref>(getTheme());

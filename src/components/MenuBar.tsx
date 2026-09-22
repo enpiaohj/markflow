@@ -56,6 +56,7 @@ export default function MenuBar() {
     requestSearchView,
     closeCurrentLibrary,
     openManager,
+    openSettingsSection,
     viewerFile,
     deliveryOpen,
     closeDocument,
@@ -198,7 +199,7 @@ export default function MenuBar() {
         { separator: true },
         { label: "保存", shortcut: "Ctrl+S", onClick: save, disabled: !openFile },
         { label: "关闭文档", shortcut: "Ctrl+W", onClick: () => void closeDocument(), disabled: !openFile && !viewerFile && !deliveryOpen },
-        { label: "关闭当前文档库（保留在列表）", onClick: closeCurrentLibrary, disabled: !current },
+        { label: "关闭当前文档库", onClick: closeCurrentLibrary, disabled: !current },
         { label: "管理文档库…", onClick: () => { requestView("library"); openManager(); } },
         { separator: true },
         // 「退出」是真正退出（开启「关闭时最小化到通知区域」后，窗口的关闭按钮只会隐藏窗口）
@@ -242,15 +243,10 @@ export default function MenuBar() {
         { label: "快捷键", onClick: () => void dialog.alert(SHORTCUTS_HELP, "快捷键") },
         {
           label: "关于 MarkFlow",
-          onClick: () =>
-            void api
-              .appInfo()
-              .then((info) =>
-                dialog.alert(
-                  `MarkFlow v${info.version}\n多格式本地文档库桌面应用\n\n本地优先 · 文件为真源 · 操作可恢复`,
-                  "关于 MarkFlow",
-                ),
-              ),
+          onClick: () => {
+            openSettingsSection("about");
+            requestView("settings");
+          },
         },
       ],
     },
