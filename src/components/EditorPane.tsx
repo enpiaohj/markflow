@@ -460,7 +460,7 @@ export default function EditorPane() {
         setEntry(detail);
         if (!EDITABLE_FORMATS.has(detail.format)) {
           setLoadState("error");
-          setLoadError(`「${detail.formatLabel}」暂不支持编辑，预览能力按 v0.3 路线交付。`);
+          setLoadError(`无法在编辑器中打开「${detail.formatLabel}」文件，请返回文档库双击该文件，以正确方式打开。`);
           return;
         }
         return api.readTextFile(current.id, openFile.relativePath, getMaxEditMb() * 1024 * 1024).then((file) => {
@@ -675,7 +675,7 @@ export default function EditorPane() {
         const ok = await dialog.confirm({
           title: "疑似敏感信息",
           message: "当前文档包含疑似敏感信息（详见「检查」面板）。\n确认将其发送给 AI Provider 进行润色吗？",
-          confirmText: "知情并发送",
+          confirmText: "仍要发送",
           danger: true,
         });
         if (ok) await runPolish(true);

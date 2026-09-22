@@ -471,7 +471,7 @@ export default function AiPanel({ currentPath }: { currentPath: string }) {
               }}
               className="h-6.5 rounded-md bg-amber-500 px-2 text-[11px] font-medium text-white hover:bg-amber-600"
             >
-              知情并继续发送
+              仍要发送
             </button>
           </div>
         </div>

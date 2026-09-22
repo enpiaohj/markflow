@@ -20,7 +20,7 @@ export default function PlaceholderView({
         {description}
       </p>
       <span className="mt-4 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] text-gray-500">
-        规划中 · 按 v0.1–v0.5 路线交付
+        规划中，按路线图后续交付
       </span>
     </div>
   );

@@ -68,7 +68,7 @@ export default function TasksView() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">后台任务</h2>
           <p className="mt-0.5 text-[13px] text-gray-500">
-            索引、重扫等后台任务的进度、失败原因与重试入口（v0.1 覆盖扫描类任务）
+            索引、转换、导入、交付等后台任务的进度、失败原因与重试入口
           </p>
         </div>
         <button
