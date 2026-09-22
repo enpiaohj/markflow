@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FolderOpen, FolderPlus, Clock, FileText } from "lucide-react";
+import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { formatTime } from "../lib/format";
@@ -118,7 +119,7 @@ export default function HomeView() {
                   onClick={() => void openPath(f.path)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-primary-50/50"
                 >
-                  <FileText className="h-4 w-4 shrink-0 text-gray-400" />
+                  <FileTypeIcon format="other" name={f.path.split(/[\\/]/).pop() ?? f.path} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-gray-900">{f.path.replace(/\\/g, "/").split("/").pop()}</span>
                     <span className="block truncate text-xs text-gray-400">{f.path}</span>

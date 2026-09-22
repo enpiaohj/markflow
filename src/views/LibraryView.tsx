@@ -3,17 +3,14 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Clock,
   FilePlus2,
   FolderOpen,
   FolderPlus,
   Import,
   Pencil,
-  Link2,
   Loader2,
   Plus,
   ShieldCheck,
-  Star,
   Trash2,
   TriangleAlert,
   X,
@@ -22,7 +19,7 @@ import {
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import LibraryManagePanel from "../components/LibraryManagePanel";
-import DetailsPreview from "../components/DetailsPreview";
+import DetailsPreview, { hasDetailsPreview } from "../components/DetailsPreview";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
@@ -45,12 +42,6 @@ interface PendingHandlers {
   noop: () => void;
 }
 
-const SMART_COLLECTIONS = [
-  { label: "最近使用", icon: Clock },
-  { label: "收藏", icon: Star },
-  { label: "待审阅", icon: FilePlus2 },
-  { label: "未关联", icon: Link2 },
-] as const;
 
 // ---------------------------------------------------------------------------
 // 目录树（懒加载）
@@ -109,7 +100,7 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
           title={entry.isDir ? "单击查看 · 点箭头展开 · 双击打开" : "双击打开（编辑 / 预览）"}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pr-2"
         >
-          <FileTypeIcon format={entry.format} size="sm" />
+          <FileTypeIcon format={entry.format} name={entry.name} size="sm" />
           <span className="truncate">{entry.name}</span>
         </button>
       </div>
@@ -730,11 +721,6 @@ export default function LibraryView() {
                 </>
               )}
             </div>
-            <div className="flex gap-1 border-b border-gray-100 px-2 py-1.5 text-[12.5px]">
-              <span className="rounded-md bg-primary-50 px-2.5 py-1 font-medium text-primary-700">文件</span>
-              <span title="按路线图后续交付" className="cursor-not-allowed rounded-md px-2.5 py-1 text-gray-300">大纲</span>
-              <span title="按路线图后续交付" className="cursor-not-allowed rounded-md px-2.5 py-1 text-gray-300">引用</span>
-            </div>
             <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
               {selectorLib ? (
                 <LibrarySection
@@ -775,21 +761,6 @@ export default function LibraryView() {
           </>
         ) : (
           <>
-        <div className="space-y-0.5 border-b border-gray-100 px-2 py-2">
-          {SMART_COLLECTIONS.map(({ label, icon: Icon }) => (
-            <button
-              key={label}
-              type="button"
-              disabled
-              title="智能集合尚未开放，按路线图后续交付"
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-gray-400"
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-              <span className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400">未开放</span>
-            </button>
-          ))}
-        </div>
         <p className="flex items-center justify-between px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-gray-400">
           文档库（{workspace.length}）
           <button
@@ -967,7 +938,7 @@ export default function LibraryView() {
                   >
                     <td className="max-w-0 px-4 py-2">
                       <span className="flex items-center gap-2.5">
-                        <FileTypeIcon format={entry.format} size="sm" />
+                        <FileTypeIcon format={entry.format} name={entry.name} size="sm" />
                         <span className="truncate text-gray-800">{entry.name}</span>
                       </span>
                     </td>
@@ -995,7 +966,7 @@ export default function LibraryView() {
         {selected ? (
           <div className="px-5 py-4">
             <div className="flex items-start gap-3">
-              <FileTypeIcon format={selected.format} />
+              <FileTypeIcon format={selected.format} name={selected.name} />
               <div className="min-w-0">
                 <p className="break-all text-sm font-semibold text-gray-900">{selected.name}</p>
                 <p className="mt-0.5 text-xs text-gray-400">
@@ -1031,17 +1002,7 @@ export default function LibraryView() {
               </div>
             </dl>
 
-            <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">标签</p>
-            <div className="rounded-lg border border-dashed border-gray-200 px-3 py-3 text-center text-xs text-gray-400">
-              标签功能尚未开放（按路线图后续交付）
-            </div>
-
-            <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">相关文档</p>
-            <div className="rounded-lg border border-dashed border-gray-200 px-3 py-3 text-center text-xs text-gray-400">
-              尚未建立关联，文档关联与关系图按路线图交付
-            </div>
-
-            {showDetailsPreview && (
+            {showDetailsPreview && hasDetailsPreview(selected) && (
               <>
                 <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">预览</p>
                 <DetailsPreview libraryId={current.id} entry={selected} />

@@ -158,7 +158,7 @@ export default function DeliveryView() {
                       }
                       className="accent-primary-600"
                     />
-                    <FileTypeIcon format={f.format} size="sm" />
+                    <FileTypeIcon format={f.format} name={f.relativePath} size="sm" />
                     <span className="truncate">{f.relativePath}</span>
                   </label>
                 );

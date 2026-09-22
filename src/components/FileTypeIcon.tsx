@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Folder } from "lucide-react";
-import { getSysIcon, sysIconsLoaded } from "../lib/sysIcons";
+import { FOLDER_KEY, iconKeyForName, useSysIcon } from "../lib/sysIcons";
 
 /**
  * 内置回退图标套图（系统图标不可用时使用）：
@@ -168,32 +168,34 @@ const CONTENT: Record<string, ReactNode> = {
 };
 
 /**
- * 文件类型图标：优先用本机（资源管理器）标准图标（启动时经 getSysFileTypeIcons 提取一次）；
- * 系统没有对应图标（如未装 Office 的 .md / .yaml）或提取失败时，回退到内置 Win11 纸页风格套图。
+ * 文件图标：优先用本机（资源管理器）标准图标——按**扩展名**取（传入 `name` 时），文件夹用系统文件夹图标；
+ * 系统没有对应图标、提取失败或未传文件名时，回退到内置 Win11 纸页风格套图（按格式区分）。
  */
-export default function FileTypeIcon({ format, size = "md" }: { format: string; size?: "sm" | "md" }) {
-  const cls = size === "sm" ? "h-6 w-6 text-[9px]" : "h-8 w-8 text-[10px]";
-  // 系统图标异步加载：加载完成事件触发一次重渲染
-  const [, bump] = useState(0);
-  useEffect(() => {
-    if (sysIconsLoaded()) return;
-    const f = () => bump((n) => n + 1);
-    window.addEventListener("markflow:sysicons-loaded", f);
-    return () => window.removeEventListener("markflow:sysicons-loaded", f);
-  }, []);
+export default function FileTypeIcon({
+  format,
+  name,
+  size = "md",
+}: {
+  format: string;
+  /** 文件名（用于按扩展名取系统图标）；不传时只用内置图标 */
+  name?: string;
+  size?: "sm" | "md";
+}) {
+  const cls = size === "sm" ? "h-6 w-6" : "h-8 w-8";
+  const isDir = format === "directory";
+  const sys = useSysIcon(isDir ? FOLDER_KEY : name !== undefined ? iconKeyForName(name) : null);
 
-  if (format === "directory") {
-    return (
-      <span className={`${cls} flex shrink-0 items-center justify-center`}>
-        <Folder className="h-5 w-5 fill-amber-400 text-amber-400" />
-      </span>
-    );
-  }
-  const sys = getSysIcon(format);
   if (sys) {
     return (
       <span className={`${cls} flex shrink-0 items-center justify-center`} aria-hidden="true">
-        <img src={sys} alt="" className="h-full w-full" draggable={false} />
+        <img src={sys} alt="" className="h-full w-full object-contain" draggable={false} />
+      </span>
+    );
+  }
+  if (isDir) {
+    return (
+      <span className={`${cls} flex shrink-0 items-center justify-center`} aria-hidden="true">
+        <Folder className="h-5 w-5 fill-amber-400 text-amber-400" />
       </span>
     );
   }

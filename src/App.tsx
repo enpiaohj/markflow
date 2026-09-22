@@ -1,30 +1,43 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./lib/api";
-import { Share2 } from "lucide-react";
+import { Loader2, Share2 } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import ActivityBar from "./components/ActivityBar";
 import StatusBar from "./components/StatusBar";
 import CreateLibraryWizard from "./components/CreateLibraryWizard";
-import EditorPane from "./components/EditorPane";
-import ImagePreviewPane from "./components/ImagePreviewPane";
-import PdfViewer from "./components/PdfViewer";
-import OfficePreviewPane from "./components/OfficePreviewPane";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { DialogProvider, useDialog } from "./components/DialogContext";
 import { LibraryProvider, TabScope, useLibrary } from "./components/LibraryContext";
 import { EditorStatusProvider } from "./components/EditorStatusContext";
 import { ZoomProvider, ZoomScope } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
-import DeliveryView from "./views/DeliveryView";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
-import SearchView from "./views/SearchView";
-import TasksView from "./views/TasksView";
-import HistoryView from "./views/HistoryView";
 import PlaceholderView from "./views/PlaceholderView";
-import SettingsView from "./views/SettingsView";
 import type { ViewId } from "./navigation";
+
+// 首屏只加载外壳、开始页与文档库；编辑器（Tiptap / CodeMirror）、PDF.js、Office 查看器、交付与设置等
+// 较重的模块按需加载，缩短启动时间（首次打开对应视图时加载一次，之后命中缓存）
+const EditorPane = lazy(() => import("./components/EditorPane"));
+const ImagePreviewPane = lazy(() => import("./components/ImagePreviewPane"));
+const PdfViewer = lazy(() => import("./components/PdfViewer"));
+const OfficePreviewPane = lazy(() => import("./components/OfficePreviewPane"));
+const DeliveryView = lazy(() => import("./views/DeliveryView"));
+const SearchView = lazy(() => import("./views/SearchView"));
+const TasksView = lazy(() => import("./views/TasksView"));
+const HistoryView = lazy(() => import("./views/HistoryView"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+
+/** 按需加载模块时的占位 */
+function PaneLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-gray-400">
+      <Loader2 className="h-5 w-5 animate-spin" />
+    </div>
+  );
+}
 
 const placeholderViews: Record<
   "graph",
@@ -136,6 +149,8 @@ function Shell() {
               <div key={tab.id} className="h-full" style={{ display: active ? "block" : "none" }}>
                 <TabScope tab={tab} active={active}>
                   <ZoomScope active={active}>
+                    <ErrorBoundary scope="此文档">
+                    <Suspense fallback={<PaneLoading />}>
                     {tab.kind === "editor" ? (
                       <EditorPane />
                     ) : tab.kind === "delivery" ? (
@@ -149,12 +164,16 @@ function Shell() {
                     ) : (
                       <OfficePreviewPane />
                     )}
+                    </Suspense>
+                    </ErrorBoundary>
                   </ZoomScope>
                 </TabScope>
               </div>
             );
           })}
           <div className="h-full" style={{ display: activeTabId ? "none" : "block" }}>
+            <ErrorBoundary key={activeView} scope="此视图">
+            <Suspense fallback={<PaneLoading />}>
             {activeView === "home" && <HomeView />}
             {activeView === "library" && <LibraryView />}
             {activeView === "search" && <SearchView />}
@@ -164,6 +183,8 @@ function Shell() {
             {placeholderViews[activeView as "graph"] && (
               <PlaceholderView {...placeholderViews[activeView as "graph"]} />
             )}
+            </Suspense>
+            </ErrorBoundary>
           </div>
           </div>
         </main>
@@ -176,16 +197,18 @@ function Shell() {
 
 export default function App() {
   return (
-    <DialogProvider>
-      <ZoomProvider>
-        <LibraryProvider>
-          <TasksProvider>
-            <EditorStatusProvider>
-              <Shell />
-            </EditorStatusProvider>
-          </TasksProvider>
-        </LibraryProvider>
-      </ZoomProvider>
-    </DialogProvider>
+    <ErrorBoundary scope="MarkFlow 界面">
+      <DialogProvider>
+        <ZoomProvider>
+          <LibraryProvider>
+            <TasksProvider>
+              <EditorStatusProvider>
+                <Shell />
+              </EditorStatusProvider>
+            </TasksProvider>
+          </LibraryProvider>
+        </ZoomProvider>
+      </DialogProvider>
+    </ErrorBoundary>
   );
 }

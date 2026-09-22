@@ -19,35 +19,6 @@ import { useLibrary } from "./LibraryContext";
 
 const STEPS = ["选择文件夹", "索引设置", "确认添加"] as const;
 
-function Switch({
-  checked,
-  onChange,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5.5 w-10 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
-        checked ? "bg-primary-600" : "bg-gray-200"
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition-all ${
-          checked ? "left-[calc(100%-1.25rem)]" : "left-0.5"
-        }`}
-      />
-    </button>
-  );
-}
-
 function PrivacyPoint({ icon: Icon, title, description }: { icon: typeof Zap; title: string; description: string }) {
   return (
     <div className="flex gap-3">
@@ -74,9 +45,6 @@ export default function CreateLibraryWizard() {
   const [quick, setQuick] = useState<QuickScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fullTextIndex, setFullTextIndex] = useState(true);
-  const [ocrEnabled, setOcrEnabled] = useState(true);
-  const [portableMeta, setPortableMeta] = useState(false);
   const [extraExcludes, setExtraExcludes] = useState("");
   const [creating, setCreating] = useState(false);
   const [libName, setLibName] = useState("");
@@ -88,9 +56,6 @@ export default function CreateLibraryWizard() {
       setQuick(null);
       setError(null);
       setExtraExcludes("");
-      setFullTextIndex(true);
-      setOcrEnabled(true);
-      setPortableMeta(false);
     }
   }, [wizardOpen]);
 
@@ -160,9 +125,9 @@ export default function CreateLibraryWizard() {
         rootPath,
         name: nameTrim,
         excludeDirs: parseExcludes(),
-        fullTextIndex,
-        ocrEnabled,
-        portableMeta,
+        fullTextIndex: true,
+        ocrEnabled: false,
+        portableMeta: false,
       });
       await libraryCreated(meta.id);
     } catch (err) {
@@ -296,41 +261,25 @@ export default function CreateLibraryWizard() {
             <div>
               <p className="mb-3 text-sm font-medium text-gray-700">索引能力</p>
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
-                  <div>
-                    <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                      <FileText className="h-4 w-4 text-blue-600" />
-                      全文索引
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      提取 Markdown、Office、PDF 等文档的文本内容（提取引擎将在后续迭代启用）
-                    </p>
-                  </div>
-                  <Switch checked={fullTextIndex} onChange={setFullTextIndex} />
+                <div className="rounded-lg border border-gray-200 px-4 py-3">
+                  <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    全文索引
+                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-normal text-emerald-700">自动</span>
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
+                    自动提取 Markdown、文本、代码、JSON / YAML / XML / CSV 与 Word / Excel / PowerPoint 的正文，添加后即可按内容搜索；PDF 正文暂不支持搜索。
+                  </p>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
-                  <div>
-                    <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                      <Image className="h-4 w-4 text-violet-500" />
-                      图片 OCR
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      识别图片中的文字，如截图、扫描件（将在后续迭代启用）
-                    </p>
-                  </div>
-                  <Switch checked={ocrEnabled} onChange={setOcrEnabled} />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
-                  <div>
-                    <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                      便携元数据
-                    </p>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      在文件夹内保存索引元数据文件，便于随库迁移（将在后续迭代启用）
-                    </p>
-                  </div>
-                  <Switch checked={portableMeta} onChange={setPortableMeta} />
+                <div className="rounded-lg border border-gray-200 px-4 py-3">
+                  <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                    <Image className="h-4 w-4 text-violet-500" />
+                    图片文字识别
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-normal text-gray-600">按需</span>
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
+                    在图片查看器中点击「OCR 识别」，识别出的文字会加入全文索引，之后即可搜到截图、扫描件中的内容。
+                  </p>
                 </div>
               </div>
 
@@ -381,11 +330,7 @@ export default function CreateLibraryWizard() {
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="shrink-0 text-gray-500">全文索引</dt>
-                    <dd className="text-gray-800">{fullTextIndex ? "开启" : "关闭"}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt className="shrink-0 text-gray-500">图片 OCR</dt>
-                    <dd className="text-gray-800">{ocrEnabled ? "开启" : "关闭"}</dd>
+                    <dd className="text-gray-800">自动（文本类与 Office 正文）</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="shrink-0 text-gray-500">排除规则</dt>

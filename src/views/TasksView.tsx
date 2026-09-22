@@ -98,7 +98,7 @@ export default function TasksView() {
 
       <p className="mt-auto flex items-center gap-1.5 pb-4 text-xs text-gray-400">
         <CircleDashed className="h-3.5 w-3.5" />
-        任务历史保存在内存中，重启应用后清空；任务持久化与 OCR / AI / 导出类任务按路线图交付。
+        任务记录仅保留在本次运行期间，重启应用后清空。
       </p>
     </div>
   );

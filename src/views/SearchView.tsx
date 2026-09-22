@@ -91,7 +91,7 @@ export default function SearchView() {
         </button>
       </div>
       <p className="mt-2 text-xs text-gray-400">
-        检索文件名与正文（Markdown、文本、代码、JSON、YAML、CSV 等；Office/PDF 正文索引按路线交付）。
+        检索文件名与正文（Markdown、文本、代码、JSON、YAML、CSV，以及 Word / Excel / PowerPoint 正文；PDF 正文暂不支持）。
         不足 3 个字符时使用逐文件的子串匹配，大库中速度会慢于长关键词。
       </p>
 
@@ -134,7 +134,7 @@ export default function SearchView() {
                     onClick={() => requestFocusFile(hit.relativePath)}
                     className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
                   >
-                    <FileTypeIcon format={hit.format} size="sm" />
+                    <FileTypeIcon format={hit.format} name={hit.name} size="sm" />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <span className="truncate text-[13px] font-medium text-gray-900">{hit.name}</span>
