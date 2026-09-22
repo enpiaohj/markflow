@@ -5,6 +5,7 @@ mod component_manager;
 mod convert;
 mod delivery;
 mod editor;
+mod external_tools;
 mod format;
 mod fsops;
 mod images;
@@ -325,6 +326,26 @@ fn open_path_in_system(
     let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
     let path = std::path::Path::new(&root).join(&relative_path);
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
+}
+
+/// 用外部工具打开文档库内的文件 / 目录：`tool` 为 vscode-file / vscode-folder / powershell / cmd / explorer。
+/// 路径经库根校验，以参数数组传递（中文 / 空格路径安全），不拼命令行。
+#[tauri::command]
+fn open_with_external(
+    state: State<'_, AppState>,
+    library_id: String,
+    relative_path: String,
+    tool: String,
+) -> Result<(), String> {
+    let root = library::get_library(&state.0.lock().unwrap(), &library_id)?.root_path;
+    let target = external_tools::resolve_target(&root, &relative_path)?;
+    external_tools::launch(external_tools::Tool::parse(&tool)?, &target)
+}
+
+/// 是否检测到 VS Code（用于菜单提示；不启动任何程序）。
+#[tauri::command]
+fn vscode_available() -> bool {
+    external_tools::find_vscode().is_some()
 }
 
 /// 列出库内全部文件（AI 上下文选择用）。
@@ -1125,8 +1146,14 @@ fn read_text_file(
     state: State<'_, AppState>,
     library_id: String,
     relative_path: String,
+    max_bytes: Option<u64>,
 ) -> Result<editor::TextFileContent, String> {
-    editor::read_text_file(&state.0.lock().unwrap(), &library_id, &relative_path)
+    editor::read_text_file_with(
+        &state.0.lock().unwrap(),
+        &library_id,
+        &relative_path,
+        max_bytes.unwrap_or(editor::DEFAULT_MAX_EDIT_BYTES),
+    )
 }
 
 /// 保存文本文件：冲突检测 → 自动快照 → 原子写入 → 索引更新。保存后发送 `file:saved`。
@@ -1139,14 +1166,18 @@ fn save_text_file(
     content: String,
     base_mtime: i64,
     force: bool,
+    encoding_override: Option<String>,
+    eol_override: Option<String>,
 ) -> Result<editor::SaveOutcome, String> {
-    let outcome = editor::save_text_file(
+    let outcome = editor::save_text_file_as(
         &state.0.lock().unwrap(),
         &library_id,
         &relative_path,
         &content,
         base_mtime,
         force,
+        encoding_override.as_deref(),
+        eol_override.as_deref(),
     );
     if outcome.is_ok() {
         let _ = app.emit(
@@ -1261,6 +1292,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             import_image_asset,
+            open_with_external,
+            vscode_available,
             save_image_bytes,
             get_shell_prefs,
             set_close_to_tray,

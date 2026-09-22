@@ -6,6 +6,25 @@ export interface EditorStatus {
   chars: number;
   line?: number;
   col?: number;
+  /** 代码编辑信息（仅文本 / 代码类文件） */
+  code?: {
+    language: string;
+    encoding: string;
+    /** 保存时将转换为该编码 / 换行符（用户显式选择后才有值） */
+    pendingEncoding?: string | null;
+    eol: "CRLF" | "LF";
+    pendingEol?: "CRLF" | "LF" | null;
+    indent: string;
+    readOnly: boolean;
+    largeMode: boolean;
+    saveState: "saved" | "dirty" | "saving" | "error";
+    errors: number;
+    warnings: number;
+    onPickLanguage: () => void;
+    onPickEncoding: () => void;
+    onPickEol: () => void;
+    onShowProblems: () => void;
+  };
 }
 
 interface Ctx {

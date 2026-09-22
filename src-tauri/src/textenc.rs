@@ -13,6 +13,13 @@ pub enum Encoding {
 }
 
 impl Encoding {
+    /// 由显示名（`label()` 的输出，大小写不敏感）解析。
+    pub fn from_label(label: &str) -> Option<Encoding> {
+        [Encoding::Utf8, Encoding::Utf8Bom, Encoding::Utf16Le, Encoding::Utf16Be, Encoding::Gbk]
+            .into_iter()
+            .find(|e| e.label().eq_ignore_ascii_case(label.trim()))
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Encoding::Utf8 => "UTF-8",

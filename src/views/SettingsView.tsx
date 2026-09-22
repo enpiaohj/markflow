@@ -25,6 +25,9 @@ import {
   getTheme,
   getLibraryLayout,
   getEditorWrap,
+  getLargeFileMb,
+  getMaxEditMb,
+  setEditorSizeLimits,
   setEditorWrap,
   setLibraryLayout,
   type LibraryLayoutPref,
@@ -97,6 +100,8 @@ export default function SettingsView() {
   // ---- 偏好 ----
   const [theme, setThemeState] = useState<ThemePref>(getTheme());
   const [wrap, setWrapState] = useState(getEditorWrap());
+  const [largeMb, setLargeMb] = useState(getLargeFileMb());
+  const [maxMb, setMaxMb] = useState(getMaxEditMb());
   const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
   const [autosave, setAutosaveState] = useState(getAutosave());
   const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
@@ -283,6 +288,55 @@ export default function SettingsView() {
     },
     {
       section: "editor",
+      label: "大文件保护",
+      description: "大文件保护：超过「保护模式」大小的文件会关闭语法高亮、折叠、括号联动与诊断以保证输入流畅，仍可编辑；超过「拒绝编辑」大小则不在应用内打开，引导使用 VS Code 等外部工具。",
+      keywords: "大文件 保护模式 阈值 大小 限制 MB 性能 卡顿 拒绝编辑",
+      node: (
+        <SettingRow key="large" label="大文件保护" description="大文件保护：超过「保护模式」大小的文件会关闭语法高亮、折叠、括号联动与诊断以保证输入流畅，仍可编辑；超过「拒绝编辑」大小则不在应用内打开，引导使用 VS Code 等外部工具。">
+          <div className="flex flex-col items-end gap-1.5 text-xs text-gray-500">
+            <label className="flex items-center gap-2">
+              保护模式大于
+              <input
+                type="number"
+                min={0.1}
+                step={0.5}
+                value={largeMb}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || v <= 0) return;
+                  setLargeMb(v);
+                  setEditorSizeLimits(v, maxMb);
+                  setMaxMb(getMaxEditMb());
+                }}
+                className="h-7 w-20 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-800 outline-none focus:border-primary-500"
+              />
+              MB
+            </label>
+            <label className="flex items-center gap-2">
+              拒绝编辑大于
+              <input
+                type="number"
+                min={1}
+                max={256}
+                step={10}
+                value={maxMb}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || v < 1) return;
+                  setMaxMb(v);
+                  setEditorSizeLimits(largeMb, v);
+                  setMaxMb(getMaxEditMb());
+                }}
+                className="h-7 w-20 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-800 outline-none focus:border-primary-500"
+              />
+              MB
+            </label>
+          </div>
+        </SettingRow>
+      ),
+    },
+    {
+      section: "editor",
       label: "源码模式自动换行",
       description: "开启后，源码模式与纯文本（.txt、日志等）中过长的行自动折行显示，不再需要左右拖动；关闭则保持单行并横向滚动。",
       keywords: "换行 折行 长文本 横向滚动 源码 文本 wrap",
@@ -347,7 +401,7 @@ export default function SettingsView() {
     const custom = SECTIONS.filter((s) => ["ai", "components", "about"].includes(s.id) && `${s.label} ${s.keywords}`.toLowerCase().includes(q));
     return { simple, custom };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, theme, layout, wrap, autosave, officeEngine, shell, shellBusy]);
+  }, [q, theme, layout, wrap, largeMb, maxMb, autosave, officeEngine, shell, shellBusy]);
 
   const sectionLabel = (id: SectionId) => SECTIONS.find((s) => s.id === id)?.label ?? "";
 

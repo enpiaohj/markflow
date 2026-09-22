@@ -95,11 +95,34 @@ pub const FORMATS: &[FormatDef] = &[
     },
 ];
 
+/// 按整个文件名识别的格式（无扩展名 / 以点开头的约定文件）。
+const FILENAME_FORMATS: &[(&str, &str)] = &[
+    ("dockerfile", "code"),
+    ("makefile", "code"),
+    ("gnumakefile", "code"),
+    ("jenkinsfile", "code"),
+    ("vagrantfile", "code"),
+    (".gitignore", "config"),
+    (".gitattributes", "config"),
+    (".dockerignore", "config"),
+    (".npmrc", "config"),
+    (".env", "config"),
+    (".bashrc", "code"),
+    (".zshrc", "code"),
+    (".prettierrc", "json"),
+    (".eslintrc", "json"),
+];
+
 pub const OTHER_FORMAT_ID: &str = "other";
 pub const OTHER_FORMAT_LABEL: &str = "其他";
 
 /// 从文件名检测格式 id（按最后一个扩展名，大小写不敏感）。
 pub fn detect_format(file_name: &str) -> &'static str {
+    // 无扩展名（或整个文件名就是约定名）的脚本 / 配置文件：先按文件名识别
+    let lower = file_name.to_ascii_lowercase();
+    if let Some(id) = FILENAME_FORMATS.iter().find(|(n, _)| *n == lower.as_str()).map(|(_, id)| *id) {
+        return id;
+    }
     let ext = match file_name.rsplit_once('.') {
         Some((_, ext)) if !ext.is_empty() => ext.to_ascii_lowercase(),
         _ => return OTHER_FORMAT_ID,
@@ -136,6 +159,9 @@ mod tests {
         assert_eq!(detect_format("网络架构设计.pdf"), "pdf");
         assert_eq!(detect_format("系统架构图.png"), "image");
         assert_eq!(detect_format("部署脚本.sh"), "code");
+        assert_eq!(detect_format("Dockerfile"), "code");
+        assert_eq!(detect_format(".gitignore"), "config");
+        assert_eq!(detect_format(".env"), "config");
         assert_eq!(detect_format("系统配置.json"), "json");
         assert_eq!(detect_format("docker-compose.yml"), "yaml");
         assert_eq!(detect_format("服务器清单.csv"), "csv");
@@ -147,7 +173,7 @@ mod tests {
     fn detect_fallbacks() {
         assert_eq!(detect_format("无扩展名"), "other");
         assert_eq!(detect_format("未知格式.xyz123"), "other");
-        assert_eq!(detect_format(".gitignore"), "other");
+        assert_eq!(detect_format(".unknownrc"), "other"); // 只有约定名（.gitignore / Dockerfile 等）才按文件名识别
         assert_eq!(detect_format("archive.tar.gz"), "archive");
     }
 

@@ -6,6 +6,59 @@ import { useEditorStatus } from "./EditorStatusContext";
 import { useTasks } from "./TasksContext";
 import { useZoom, zoomPresets } from "./ZoomContext";
 
+type CodeInfo = NonNullable<import("./EditorStatusContext").EditorStatus["code"]>;
+
+const SAVE_LABEL: Record<CodeInfo["saveState"], { text: string; cls: string }> = {
+  saved: { text: "已保存", cls: "text-emerald-600" },
+  dirty: { text: "未保存", cls: "text-amber-600" },
+  saving: { text: "保存中…", cls: "text-gray-500" },
+  error: { text: "保存失败", cls: "text-red-500" },
+};
+
+/** 代码编辑状态：语言 / 编码 / 换行符 / 缩进 / 诊断 / 保存状态；语言、编码、换行符可点击修改。 */
+function CodeStatus({ code }: { code: CodeInfo }) {
+  const chip = "rounded px-1 hover:bg-gray-200/70";
+  const save = SAVE_LABEL[code.saveState];
+  return (
+    <>
+      <button type="button" className={chip} onClick={code.onPickLanguage} title="点击切换语言">
+        {code.language}
+      </button>
+      <button
+        type="button"
+        className={`${chip} ${code.pendingEncoding ? "font-medium text-amber-600" : ""}`}
+        onClick={code.onPickEncoding}
+        title={code.pendingEncoding ? `保存时将转换为 ${code.pendingEncoding}` : "保存时按原编码写回，点击可选择转换编码"}
+      >
+        {code.pendingEncoding ? `${code.encoding} → ${code.pendingEncoding}` : code.encoding}
+      </button>
+      <button
+        type="button"
+        className={`${chip} ${code.pendingEol ? "font-medium text-amber-600" : ""}`}
+        onClick={code.onPickEol}
+        title={code.pendingEol ? `保存时将转换为 ${code.pendingEol}` : "保存时按原换行符写回，点击可选择转换"}
+      >
+        {code.pendingEol ? `${code.eol} → ${code.pendingEol}` : code.eol}
+      </button>
+      <span title="缩进（根据文件内容推断）">{code.indent}</span>
+      {(code.errors > 0 || code.warnings > 0) && (
+        <button type="button" className={`${chip} ${code.errors > 0 ? "text-red-500" : "text-amber-600"}`} onClick={code.onShowProblems} title="打开问题面板">
+          {code.errors > 0 ? `${code.errors} 个错误` : ""}
+          {code.errors > 0 && code.warnings > 0 ? "、" : ""}
+          {code.warnings > 0 ? `${code.warnings} 个警告` : ""}
+        </button>
+      )}
+      {code.readOnly && <span className="font-medium text-amber-600">只读</span>}
+      {code.largeMode && (
+        <span className="font-medium text-sky-600" title="文件较大：已关闭语法高亮、折叠与诊断以保证流畅（可在「设置 → 编辑器」调整阈值）">
+          保护模式
+        </span>
+      )}
+      <span className={save.cls}>{save.text}</span>
+    </>
+  );
+}
+
 /**
  * 底部状态栏：当前库、索引进度、后台任务与本地优先提示（对应概念图主界面底部）。
  */
@@ -62,6 +115,7 @@ export default function StatusBar() {
             {editorStatus.line !== undefined && (
               <span className="tabular-nums">第 {editorStatus.line} 行，第 {editorStatus.col} 列</span>
             )}
+            {editorStatus.code && <CodeStatus code={editorStatus.code} />}
             <span aria-hidden="true">|</span>
           </>
         )}

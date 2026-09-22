@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Table } from "@tiptap/extension-table";
@@ -8,14 +8,12 @@ import TableCell from "@tiptap/extension-table-cell";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Markdown } from "tiptap-markdown";
-import { Compartment, EditorState } from "@codemirror/state";
-import { basicSetup, EditorView as CMEditorView } from "codemirror";
-import type { ViewUpdate } from "@codemirror/view";
-import { markdown as markdownLang } from "@codemirror/lang-markdown";
-import { json as jsonLang } from "@codemirror/lang-json";
-import { yaml as yamlLang } from "@codemirror/lang-yaml";
 import {
   ArrowLeft,
+  ExternalLink,
+  FolderOpen,
+  Terminal,
+  ListChecks,
   Bold,
   Check,
   ChevronDown,
@@ -55,7 +53,10 @@ import { LocalImage, makeImageResolver } from "./editor/LocalImage";
 import { open as openImageDialog } from "@tauri-apps/plugin-dialog";
 import { countText } from "../lib/wordCount";
 import * as api from "../lib/api";
-import { getAutosave, getEditorWrap } from "../lib/prefs";
+import { getAutosave, getEditorWrap, getLargeFileMb, getMaxEditMb } from "../lib/prefs";
+import CodeEditor, { type CodeEditorApi, type CodeIssue } from "./editor/CodeEditor";
+import ProblemsPanel from "./editor/ProblemsPanel";
+import { LANGUAGES, detectIndent, detectLanguage, languageById } from "../lib/codeLanguages";
 import type { CheckIssue } from "../lib/types";
 import { EDITABLE_FORMATS, formatSize, formatTime } from "../lib/format";
 import type { FileEntry, VersionInfo } from "../lib/types";
@@ -114,6 +115,7 @@ function VisualEditor({
   initial,
   libraryId,
   docPath,
+  readOnly,
   onChange,
   onPolish,
   registerSelection,
@@ -121,6 +123,7 @@ function VisualEditor({
   initial: string;
   libraryId: string;
   docPath: string;
+  readOnly: boolean;
   onChange: (md: string) => void;
   onPolish: () => void;
   registerSelection: (fn: () => string) => void;
@@ -175,6 +178,7 @@ function VisualEditor({
   const editor = useEditor({
     // 工具栏要随光标所在位置更新（标题级别 / 表格操作 / 高亮状态）
     shouldRerenderOnTransaction: true,
+    editable: !readOnly,
     editorProps: {
       // Ctrl+K：插入 / 编辑链接（全局搜索改用 Ctrl+Shift+F，见 App.tsx）
       handleKeyDown: (_view, event) => {
@@ -346,90 +350,6 @@ function VisualEditor({
 }
 
 // ---------------------------------------------------------------------------
-// 源码编辑器（CodeMirror 6）
-// ---------------------------------------------------------------------------
-
-function langExtension(format: string) {
-  switch (format) {
-    case "markdown":
-      return markdownLang();
-    case "json":
-      return jsonLang();
-    case "yaml":
-      return yamlLang();
-    default:
-      return [];
-  }
-}
-
-function SourceEditor({
-  initial,
-  format,
-  wrap,
-  onChange,
-  onCursor,
-  registerSelection,
-}: {
-  initial: string;
-  format: string;
-  wrap: boolean;
-  onChange: (text: string) => void;
-  onCursor: (line: number, col: number) => void;
-  registerSelection: (fn: () => string) => void;
-}) {
-  const { config: zoomConfig } = useZoom();
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const viewRef = useRef<CMEditorView | null>(null);
-  const wrapCompartment = useRef(new Compartment());
-  const onCursorRef = useRef(onCursor);
-  onCursorRef.current = onCursor;
-
-  useEffect(() => {
-    if (!hostRef.current) return;
-    const view = new CMEditorView({
-      state: EditorState.create({
-        doc: initial,
-        extensions: [basicSetup, langExtension(format),
-          // 编辑器撑满容器，由内部 scroller 出滚动条（否则长文本被外层 overflow-hidden 截断）
-          CMEditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { overflow: "auto" } }),
-          wrapCompartment.current.of(wrap ? CMEditorView.lineWrapping : []),
-          CMEditorView.updateListener.of((update: ViewUpdate) => {
-            if (update.docChanged) onChange(update.state.doc.toString());
-            if (update.docChanged || update.selectionSet) {
-              const head = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(head);
-              onCursorRef.current(line.number, head - line.from + 1);
-            }
-          }),
-        ],
-      }),
-      parent: hostRef.current,
-    });
-    viewRef.current = view;
-    registerSelection(() => {
-      const sel = view.state.selection as unknown as { from: number; to: number };
-      return view.state.sliceDoc(sel.from, sel.to);
-    });
-    onCursorRef.current(1, 1);
-    return () => view.destroy();
-    // initial 仅在挂载时使用；编辑中的变化通过 onChange 上抛，切换编辑器由 key 重建完成
-  }, []);
-
-  // 「自动换行」偏好变化时无需重建编辑器
-  useEffect(() => {
-    viewRef.current?.dispatch({ effects: wrapCompartment.current.reconfigure(wrap ? CMEditorView.lineWrapping : []) });
-  }, [wrap]);
-
-  return (
-    <div
-      ref={hostRef}
-      className="h-full overflow-hidden bg-white"
-      style={{ zoom: zoomConfig.value }}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
 // 编辑器主面板
 // ---------------------------------------------------------------------------
 
@@ -453,7 +373,19 @@ export default function EditorPane() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [versions, setVersions] = useState<VersionInfo[] | null>(null);
-  const [sidePanel, setSidePanel] = useState<"ai" | "notes" | null>(null);
+  const [sidePanel, setSidePanel] = useState<"ai" | "notes" | "problems" | null>(null);
+  // 代码编辑：文件属性、语言、缩进、显式转换、诊断
+  const [fileMeta, setFileMeta] = useState({ size: 0, readOnly: false, crlf: false });
+  const [firstLine, setFirstLine] = useState("");
+  const [langOverride, setLangOverride] = useState<string | null>(null);
+  const [indent, setIndent] = useState<{ kind: "tab" | "space"; width: number }>({ kind: "space", width: 4 });
+  const [encodingOverride, setEncodingOverride] = useState<string | null>(null);
+  const [eolOverride, setEolOverride] = useState<"crlf" | "lf" | null>(null);
+  const [codeIssues, setCodeIssues] = useState<CodeIssue[]>([]);
+  const [limits, setLimits] = useState({ large: getLargeFileMb(), max: getMaxEditMb() });
+  const [showExternal, setShowExternal] = useState(false);
+  const [vscodeOk, setVscodeOk] = useState<boolean | null>(null);
+  const editorApiRef = useRef<CodeEditorApi | null>(null);
   const selectionFnRef = useRef<(() => string) | null>(null);
   const [issues, setIssues] = useState<CheckIssue[] | null>(null);
   const [checking, setChecking] = useState(false);
@@ -484,6 +416,7 @@ export default function EditorPane() {
     const onPrefs = () => {
       setAutosaveOn(getAutosave());
       setWrapOn(getEditorWrap());
+      setLimits({ large: getLargeFileMb(), max: getMaxEditMb() });
     };
     window.addEventListener("markflow:prefs-changed", onPrefs);
     return () => window.removeEventListener("markflow:prefs-changed", onPrefs);
@@ -530,11 +463,12 @@ export default function EditorPane() {
           setLoadError(`「${detail.formatLabel}」暂不支持编辑，预览能力按 v0.3 路线交付。`);
           return;
         }
-        return api.readTextFile(current.id, openFile.relativePath).then((file) => {
+        return api.readTextFile(current.id, openFile.relativePath, getMaxEditMb() * 1024 * 1024).then((file) => {
           setSavedText(file.content);
           setEditText(file.content);
           setBaseMtime(file.baseMtime);
           setEncoding(file.encoding);
+          applyFileMeta(file);
           const found = detail.format === "markdown" ? detectVisualRisks(splitFrontMatter(file.content).body) : [];
           setRisks(found);
           // 含无法无损往返的语法时默认进入源码模式，避免可视化编辑静默改写文档
@@ -555,13 +489,37 @@ export default function EditorPane() {
     };
   }, [current, openFile]);
 
+  /** 读到文件后记录属性（大小 / 只读 / 换行符），并重置语言覆盖、缩进推断与显式转换。 */
+  function applyFileMeta(file: { content: string; size: number; readOnly: boolean; crlf: boolean }) {
+    setFileMeta({ size: file.size, readOnly: file.readOnly, crlf: file.crlf });
+    setFirstLine(file.content.split("\n", 1)[0]);
+    setIndent(detectIndent(file.content));
+    setLangOverride(null);
+    setEncodingOverride(null);
+    setEolOverride(null);
+    setCodeIssues([]);
+  }
+
   const doSave = useCallback(
     async (force: boolean) => {
       if (!current || !openFile) return;
+      if (fileMeta.readOnly) {
+        setSaveError("文件带有只读属性，无法保存。请在系统中取消只读，或用外部工具编辑。");
+        setSaveState("error");
+        return;
+      }
       setSaveState("saving");
       setSaveError("");
       try {
-        const out = await api.saveTextFile(current.id, rel, editText, baseMtime, force);
+        const out = await api.saveTextFile(current.id, rel, editText, baseMtime, force, {
+          encoding: encodingOverride,
+          eol: eolOverride,
+        });
+        // 显式转换已生效：磁盘编码 / 换行符随之改变
+        if (encodingOverride) setEncoding(encodingOverride);
+        if (eolOverride) setFileMeta((m) => ({ ...m, crlf: eolOverride === "crlf" }));
+        setEncodingOverride(null);
+        setEolOverride(null);
         setSavedText(editText);
         setBaseMtime(out.mtime);
         setSaveState("saved");
@@ -578,7 +536,7 @@ export default function EditorPane() {
         }
       }
     },
-    [current, openFile, rel, editText, baseMtime],
+    [current, openFile, rel, editText, baseMtime, fileMeta.readOnly, encodingOverride, eolOverride],
   );
 
   // Ctrl+S 保存
@@ -626,11 +584,12 @@ export default function EditorPane() {
     if (!current || !openFile) return;
     setConflict(null);
     try {
-      const file = await api.readTextFile(current.id, rel);
+      const file = await api.readTextFile(current.id, rel, getMaxEditMb() * 1024 * 1024);
       setSavedText(file.content);
       setEditText(file.content);
       setBaseMtime(file.baseMtime);
       setEncoding(file.encoding);
+      applyFileMeta(file);
       setExternalChanged(false);
       setModeEpoch((n) => n + 1);
       setSaveState("saved");
@@ -729,10 +688,70 @@ export default function EditorPane() {
   }
 
   const isMarkdown = entry?.format === "markdown";
-  const dirty = editText !== savedText;
 
   // 向全局上报未保存状态（活动栏切换时用于离开确认）
-  // 字数（Front Matter 不计）与光标位置发布到状态栏；仅激活的标签发布，离开时清除
+  const dirty = editText !== savedText || encodingOverride !== null || eolOverride !== null;
+  const language = useMemo(() => (langOverride ? languageById(langOverride) : detectLanguage(rel, firstLine)), [langOverride, rel, firstLine]);
+  const largeMode = fileMeta.size > limits.large * 1024 * 1024;
+  const errorCount = codeIssues.filter((i) => i.severity === "error").length;
+  const warningCount = codeIssues.length - errorCount;
+
+  async function pickLanguage() {
+    const id = await dialog.pick({
+      title: "选择语言",
+      message: "仅影响语法高亮与诊断，不修改文件。",
+      items: LANGUAGES.map((l) => ({ value: l.id, label: l.label })),
+      defaultValue: language.id,
+    });
+    if (id) setLangOverride(id);
+  }
+
+  async function pickEncoding() {
+    const target = await dialog.pick({
+      title: "保存编码",
+      message: `磁盘当前编码：${encoding}。默认保存时保持原编码；选择其他编码后，下次保存才会转换（含目标编码无法表示的字符时会中止保存，不会损坏文件）。`,
+      items: [
+        { value: "__keep", label: `保持原编码（${encoding}）` },
+        ...["UTF-8", "UTF-8 BOM", "GBK", "UTF-16 LE", "UTF-16 BE"].filter((e) => e !== encoding).map((e) => ({ value: e, label: `转换为 ${e}` })),
+      ],
+      defaultValue: encodingOverride ?? "__keep",
+      confirmText: "确定",
+    });
+    if (target) setEncodingOverride(target === "__keep" ? null : target);
+  }
+
+  async function pickEol() {
+    const cur = fileMeta.crlf ? "CRLF" : "LF";
+    const target = await dialog.pick({
+      title: "保存换行符",
+      message: `磁盘当前换行符：${cur}。默认保存时保持原样；选择转换后，下次保存才会统一改写全文换行符。`,
+      items: [
+        { value: "__keep", label: `保持原样（${cur}）` },
+        ...(fileMeta.crlf ? [{ value: "lf", label: "转换为 LF" }] : [{ value: "crlf", label: "转换为 CRLF" }]),
+      ],
+      defaultValue: eolOverride ?? "__keep",
+      confirmText: "确定",
+    });
+    if (target) setEolOverride(target === "__keep" ? null : (target as "crlf" | "lf"));
+  }
+
+  async function openExternal(tool: api.ExternalTool) {
+    setShowExternal(false);
+    if (!current) return;
+    try {
+      if (tool === "vscode-file" || tool === "vscode-folder") {
+        if (!(await api.vscodeAvailable())) {
+          await dialog.alert("未检测到 VS Code。请先安装 VS Code，或改用「系统默认程序」。", "无法打开");
+          return;
+        }
+      }
+      await api.openWithExternal(current.id, rel, tool);
+    } catch (err) {
+      await dialog.alert(String(err), "无法打开");
+    }
+  }
+
+  // 字数（Front Matter 不计）、光标位置与代码编辑信息发布到状态栏；仅激活的标签发布，离开时清除
   useEffect(() => {
     if (!tabActive || loadState !== "ok") return;
     const c = countText(splitFrontMatter(editText).body);
@@ -740,9 +759,27 @@ export default function EditorPane() {
       total: c.total,
       chars: c.chars,
       ...(mode === "source" && cursor ? { line: cursor.line, col: cursor.col } : {}),
+      code: {
+        language: language.label,
+        encoding,
+        pendingEncoding: encodingOverride,
+        eol: fileMeta.crlf ? "CRLF" : "LF",
+        pendingEol: eolOverride ? (eolOverride === "crlf" ? "CRLF" : "LF") : null,
+        indent: indent.kind === "tab" ? "制表符" : `空格 ${indent.width}`,
+        readOnly: fileMeta.readOnly,
+        largeMode,
+        saveState: saveState === "saving" ? "saving" : saveState === "error" ? "error" : dirty ? "dirty" : "saved",
+        errors: errorCount,
+        warnings: warningCount,
+        onPickLanguage: () => void pickLanguage(),
+        onPickEncoding: () => void pickEncoding(),
+        onPickEol: () => void pickEol(),
+        onShowProblems: () => setSidePanel("problems"),
+      },
     });
     return () => publishStatus(null);
-  }, [tabActive, loadState, editText, mode, cursor, publishStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabActive, loadState, editText, mode, cursor, publishStatus, language, encoding, encodingOverride, eolOverride, fileMeta, indent, largeMode, saveState, dirty, errorCount, warningCount]);
 
   useEffect(() => {
     setEditorDirty(dirty);
@@ -956,6 +993,86 @@ export default function EditorPane() {
               </span>
             )}
           </button>
+          {language.validator && (
+            <button
+              type="button"
+              onClick={() => setSidePanel((v) => (v === "problems" ? null : "problems"))}
+              title="问题面板：语法诊断"
+              className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
+                sidePanel === "problems"
+                  ? "border-primary-200 bg-primary-50 text-primary-700"
+                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <ListChecks className="h-3.5 w-3.5" />
+              问题
+              {codeIssues.length > 0 && (
+                <span className={`rounded px-1 text-[10px] ${errorCount > 0 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"}`}>{codeIssues.length}</span>
+              )}
+            </button>
+          )}
+
+          {/* 外部工具：VS Code / 系统默认程序 / PowerShell / CMD / 资源管理器 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowExternal((v) => !v);
+                if (vscodeOk === null) void api.vscodeAvailable().then(setVscodeOk).catch(() => setVscodeOk(false));
+              }}
+              title="用外部工具打开"
+              className="flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-600 hover:bg-gray-50"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              打开方式
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            {showExternal && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowExternal(false)} />
+                <div className="absolute right-0 top-9 z-50 w-64 rounded-xl border border-gray-200 bg-white py-1.5 text-[13px] shadow-xl">
+                  {(
+                    [
+                      ["vscode-file", "用 VS Code 打开文件", ExternalLink, vscodeOk === false],
+                      ["vscode-folder", "用 VS Code 打开所在目录", FolderOpen, vscodeOk === false],
+                    ] as const
+                  ).map(([tool, label, Icon, disabled]) => (
+                    <button key={tool} type="button" disabled={disabled} onClick={() => void openExternal(tool)}
+                      title={disabled ? "未检测到 VS Code" : undefined}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50 disabled:text-gray-300 disabled:hover:bg-transparent">
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-gray-100" />
+                  <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50"
+                    onClick={() => {
+                      setShowExternal(false);
+                      if (current) void api.openPathInSystem(current.id, rel).catch((e) => dialog.alert(String(e), "无法打开"));
+                    }}>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    用系统默认程序打开
+                  </button>
+                  <button type="button" onClick={() => void openExternal("powershell")}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50">
+                    <Terminal className="h-3.5 w-3.5" />
+                    在 PowerShell 中打开所在目录
+                  </button>
+                  <button type="button" onClick={() => void openExternal("cmd")}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50">
+                    <Terminal className="h-3.5 w-3.5" />
+                    在 CMD 中打开所在目录
+                  </button>
+                  <button type="button" onClick={() => void openExternal("explorer")}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-50">
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    在资源管理器中显示
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={() => setSidePanel((v) => (v === "ai" ? null : "ai"))}
@@ -1046,6 +1163,20 @@ export default function EditorPane() {
         <div className="flex items-start gap-2 border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-600">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="break-all">{saveError}</span>
+        </div>
+      )}
+
+      {fileMeta.readOnly && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+          此文件带有只读属性：可以查看和复制，但无法保存。请在系统中取消只读后重新打开，或用「打开方式」交给外部工具。
+        </div>
+      )}
+
+      {largeMode && (
+        <div className="border-b border-sky-100 bg-sky-50 px-4 py-1.5 text-[11px] text-sky-700">
+          文件较大（{(fileMeta.size / 1024 / 1024).toFixed(1)} MB）：已进入保护模式——关闭语法高亮、折叠和诊断以保证输入流畅，仍可正常编辑与保存。
+          可在「设置 → 编辑器」调整阈值。
         </div>
       )}
 
@@ -1177,37 +1308,47 @@ export default function EditorPane() {
               key={`v-${modeEpoch}`}
               libraryId={current.id}
               docPath={rel}
+              readOnly={fileMeta.readOnly}
               initial={splitFrontMatter(editText).body}
               onChange={(md) => setEditText(splitFrontMatter(editText).front + md)}
               onPolish={() => void startPolish()}
               registerSelection={(fn) => (selectionFnRef.current = fn)}
             />
           ) : (
-            <SourceEditor
+            <CodeEditor
               key={`s-${modeEpoch}`}
               initial={editText}
-              format={entry?.format ?? "text"}
+              language={language}
               wrap={wrap}
+              readOnly={fileMeta.readOnly}
+              largeMode={largeMode}
+              indent={indent}
               onCursor={(line, col) => setCursor({ line, col })}
               onChange={setEditText}
+              onIssues={setCodeIssues}
               registerSelection={(fn) => (selectionFnRef.current = fn)}
+              registerApi={(api2) => (editorApiRef.current = api2)}
             />
           )}
         </div>
       )}
-          {loadState === "ok" && (
-            <div className="flex h-6 shrink-0 items-center gap-3 border-t border-gray-200 bg-white px-4 text-[11px] text-gray-500">
-              <span>{editText.replace(/\s/g, "").length.toLocaleString()} 个字符</span>
-              <span>{(editText.match(/\n/g)?.length ?? 0) + 1} 行</span>
-              <span className={encoding === "UTF-8" ? "" : "font-medium text-amber-600"} title="保存时按原编码写回，不会改变文件编码">
-                编码 {encoding}
-              </span>
-            </div>
-          )}
         </div>
         {sidePanel && (
           <aside className="w-96 shrink-0 border-l border-gray-200">
-            {sidePanel === "ai" ? <AiPanel currentPath={rel} /> : <AnnotationsPanel currentPath={rel} getSelection={() => selectionFnRef.current?.() ?? ""} />}
+            {sidePanel === "ai" ? (
+              <AiPanel currentPath={rel} />
+            ) : sidePanel === "problems" ? (
+              <ProblemsPanel
+                issues={codeIssues}
+                supported={!!language.validator}
+                onGoto={(offset) => {
+                  if (mode !== "source") void switchMode("source").then(() => setTimeout(() => editorApiRef.current?.gotoOffset(offset), 150));
+                  else editorApiRef.current?.gotoOffset(offset);
+                }}
+              />
+            ) : (
+              <AnnotationsPanel currentPath={rel} getSelection={() => selectionFnRef.current?.() ?? ""} />
+            )}
           </aside>
         )}
       </div>

@@ -24,7 +24,16 @@ pub struct TextFileContent {
     pub size: i64,
     /// 检测到的磁盘编码（保存时按原编码写回）
     pub encoding: String,
+    /// 磁盘文件带只读属性：前端只读展示并提示，不允许保存
+    pub read_only: bool,
+    /// 磁盘文件以 CRLF 为主（状态栏显示 CRLF / LF，保存时按它写回）
+    pub crlf: bool,
 }
+
+/// 编辑大小的硬上限（防御：前端可在设置里调整上限，但不得超过它）。
+pub const HARD_MAX_EDIT_BYTES: u64 = 256 * 1024 * 1024;
+/// 默认编辑上限：超过则拒绝在应用内编辑（引导用外部工具）。
+pub const DEFAULT_MAX_EDIT_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +61,19 @@ fn file_name_of(relative_path: &str) -> String {
 }
 
 /// 读取可编辑文本文件，返回内容与冲突检测基线（读取时的磁盘 mtime）。
+#[cfg(test)]
 pub fn read_text_file(conn: &Connection, library_id: &str, relative_path: &str) -> Result<TextFileContent, String> {
+    read_text_file_with(conn, library_id, relative_path, DEFAULT_MAX_EDIT_BYTES)
+}
+
+/// 读取可编辑文本文件；`max_bytes` 为本次允许的最大字节数（由前端设置传入，受硬上限约束）。
+pub fn read_text_file_with(
+    conn: &Connection,
+    library_id: &str,
+    relative_path: &str,
+    max_bytes: u64,
+) -> Result<TextFileContent, String> {
+    let max_bytes = max_bytes.clamp(1024 * 1024, HARD_MAX_EDIT_BYTES);
     let (format, size): (String, i64) = conn
         .query_row(
             "SELECT format, size FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0",
@@ -66,21 +87,30 @@ pub fn read_text_file(conn: &Connection, library_id: &str, relative_path: &str) 
             crate::format::format_label(&format)
         ));
     }
-    if size as u64 > MAX_EXTRACT_BYTES {
-        return Err(format!("文件超过编辑大小上限（{:.0} KB）", MAX_EXTRACT_BYTES as f64 / 1024.0));
+    if size as u64 > max_bytes {
+        return Err(format!(
+            "文件（{:.1} MB）超过应用内编辑上限（{:.0} MB）。可在「设置 → 编辑器」调高上限，或用 VS Code 等外部工具打开。",
+            size as f64 / 1024.0 / 1024.0,
+            max_bytes as f64 / 1024.0 / 1024.0
+        ));
     }
     let path = content_file_path(conn, library_id, relative_path)?;
+    let read_only = std::fs::metadata(&path).map(|m| m.permissions().readonly()).unwrap_or(false);
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     let decoded = crate::textenc::decode(&bytes)?;
+    let crlf = crate::textenc::uses_crlf(&decoded.text);
     Ok(TextFileContent {
         content: decoded.text,
         base_mtime: file_mtime(&path),
         size: bytes.len() as i64,
         encoding: decoded.encoding.label().to_string(),
+        read_only,
+        crlf,
     })
 }
 
 /// 原子保存：冲突检测 → 快照旧版本 → 临时文件 + fsync → 原子替换 → 更新索引与全文检索。
+#[cfg(test)]
 pub fn save_text_file(
     conn: &Connection,
     library_id: &str,
@@ -88,6 +118,20 @@ pub fn save_text_file(
     content: &str,
     base_mtime: i64,
     force: bool,
+) -> Result<SaveOutcome, String> {
+    save_text_file_as(conn, library_id, relative_path, content, base_mtime, force, None, None)
+}
+
+/// 保存；`encoding` / `eol` 仅在用户显式选择「转换编码 / 换行符」时传入，默认按磁盘原样写回。
+pub fn save_text_file_as(
+    conn: &Connection,
+    library_id: &str,
+    relative_path: &str,
+    content: &str,
+    base_mtime: i64,
+    force: bool,
+    encoding: Option<&str>,
+    eol: Option<&str>,
 ) -> Result<SaveOutcome, String> {
     let (file_id, format): (i64, String) = conn
         .query_row(
@@ -103,6 +147,9 @@ pub fn save_text_file(
         ));
     }
     let path = content_file_path(conn, library_id, relative_path)?;
+    if std::fs::metadata(&path).map(|m| m.permissions().readonly()).unwrap_or(false) {
+        return Err("文件带有只读属性，无法保存。请先在系统中取消只读，或使用「另存为」。".into());
+    }
 
     // 1. 外部修改冲突检测（三方比较中的「另一方」当前为磁盘 mtime）
     let current_mtime = file_mtime(&path);
@@ -113,7 +160,7 @@ pub fn save_text_file(
     }
 
     // 2. 按磁盘原编码 / 原换行符编码内容（无法无损编码则中止，不损坏文件）
-    let bytes = encode_like_disk(&path, content)?;
+    let bytes = encode_like_disk(&path, content, encoding, eol)?;
 
     // 3. 保存前自动快照当前磁盘版本（§8.14），再原子写入：同目录临时文件 → fsync → 原子替换
     snapshot_current(conn, library_id, relative_path, &path)?;
@@ -139,7 +186,7 @@ pub fn restore_file_version(
         )
         .map_err(|_| "版本不存在或已被清理")?;
     let path = content_file_path(conn, library_id, relative_path)?;
-    let bytes = encode_like_disk(&path, &content)?;
+    let bytes = encode_like_disk(&path, &content, None, None)?;
     snapshot_current(conn, library_id, relative_path, &path)?;
     atomic_write(&path, &bytes)?;
     let (file_id, _): (i64, String) = conn
@@ -278,8 +325,14 @@ fn snapshot_current(conn: &Connection, library_id: &str, relative_path: &str, pa
 }
 
 /// 依据磁盘现有文件的编码与换行符编码新内容；文件尚不存在时使用 UTF-8 + LF。
-fn encode_like_disk(path: &Path, content: &str) -> Result<Vec<u8>, String> {
-    let (encoding, crlf) = match std::fs::read(path) {
+/// 默认按磁盘原编码 / 原换行符编码；`encoding_override` / `eol_override` 为用户显式转换。
+fn encode_like_disk(
+    path: &Path,
+    content: &str,
+    encoding_override: Option<&str>,
+    eol_override: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let (mut encoding, mut crlf) = match std::fs::read(path) {
         Ok(bytes) => {
             let d = crate::textenc::decode(&bytes)?;
             let crlf = crate::textenc::uses_crlf(&d.text);
@@ -287,6 +340,15 @@ fn encode_like_disk(path: &Path, content: &str) -> Result<Vec<u8>, String> {
         }
         Err(_) => (crate::textenc::Encoding::Utf8, false),
     };
+    if let Some(label) = encoding_override {
+        encoding = crate::textenc::Encoding::from_label(label).ok_or_else(|| format!("不支持的目标编码「{label}」"))?;
+    }
+    match eol_override {
+        Some("crlf") => crlf = true,
+        Some("lf") => crlf = false,
+        Some(other) => return Err(format!("不支持的换行符「{other}」")),
+        None => {}
+    }
     let text = crate::textenc::apply_line_ending(content, crlf);
     crate::textenc::encode(&text, encoding)
 }
@@ -332,6 +394,60 @@ mod tests {
         create_library, list_children, run_migrations, scan_library_with, CreateLibraryRequest, ScanOptions,
     };
     use rusqlite::Connection;
+
+    #[test]
+    fn explicit_encoding_and_eol_conversion_only_when_requested() {
+        let (conn, dir, lib_id) = setup_library();
+        let rel = "docs/编码.txt";
+        std::fs::write(dir.path().join("docs").join("编码.txt"), b"a\r\nb\r\n").unwrap();
+        scan_library_with(&conn, &lib_id, dir.path(), &[], ScanOptions::default()).unwrap();
+        let base = read_text_file(&conn, &lib_id, rel).unwrap();
+        assert!(base.crlf && !base.read_only);
+        // 默认：原样（CRLF、UTF-8）
+        save_text_file(&conn, &lib_id, rel, "a\nb\nc\n", base.base_mtime, false).unwrap();
+        assert_eq!(std::fs::read(dir.path().join("docs").join("编码.txt")).unwrap(), b"a\r\nb\r\nc\r\n");
+        // 显式转换：LF + UTF-8 BOM
+        let base = read_text_file(&conn, &lib_id, rel).unwrap();
+        save_text_file_as(&conn, &lib_id, rel, "中文\nx\n", base.base_mtime, false, Some("utf-8 bom"), Some("lf")).unwrap();
+        let bytes = std::fs::read(dir.path().join("docs").join("编码.txt")).unwrap();
+        assert_eq!(&bytes[..3], &[0xEF, 0xBB, 0xBF]);
+        assert!(!bytes.windows(2).any(|w| w == b"\r\n"));
+        // 不支持的目标编码 → 报错且文件不变
+        let base = read_text_file(&conn, &lib_id, rel).unwrap();
+        assert!(save_text_file_as(&conn, &lib_id, rel, "x", base.base_mtime, false, Some("latin9"), None).is_err());
+        assert_eq!(std::fs::read(dir.path().join("docs").join("编码.txt")).unwrap(), bytes);
+    }
+
+    #[test]
+    fn read_only_file_is_flagged_and_not_saved() {
+        let (conn, dir, lib_id) = setup_library();
+        let rel = "docs/只读.txt";
+        let p = dir.path().join("docs").join("只读.txt");
+        std::fs::write(&p, "锁定").unwrap();
+        scan_library_with(&conn, &lib_id, dir.path(), &[], ScanOptions::default()).unwrap();
+        let mut perm = std::fs::metadata(&p).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&p, perm).unwrap();
+        let read = read_text_file(&conn, &lib_id, rel).unwrap();
+        assert!(read.read_only);
+        assert!(save_text_file(&conn, &lib_id, rel, "改动", read.base_mtime, false).is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "锁定");
+        let mut perm = std::fs::metadata(&p).unwrap().permissions();
+        perm.set_readonly(false);
+        std::fs::set_permissions(&p, perm).unwrap();
+    }
+
+    #[test]
+    fn edit_size_limit_is_configurable() {
+        let (conn, dir, lib_id) = setup_library();
+        let p = dir.path().join("docs").join("大.txt");
+        std::fs::write(&p, vec![b'a'; 3 * 1024 * 1024]).unwrap();
+        scan_library_with(&conn, &lib_id, dir.path(), &[], ScanOptions::default()).unwrap();
+        // 上限 2MB：拒绝并给出可操作提示；上限 4MB：可读
+        let err = read_text_file_with(&conn, &lib_id, "docs/大.txt", 2 * 1024 * 1024).unwrap_err();
+        assert!(err.contains("设置") && err.contains("外部工具"));
+        assert!(read_text_file_with(&conn, &lib_id, "docs/大.txt", 4 * 1024 * 1024).is_ok());
+    }
 
     fn memory_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

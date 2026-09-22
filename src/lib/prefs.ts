@@ -45,6 +45,38 @@ export function setOfficeEngine(pref: OfficeEnginePref): void {
   }
 }
 
+const LARGE_MB_KEY = "mf-pref-editor-large-mb";
+const MAX_MB_KEY = "mf-pref-editor-max-mb";
+
+function readMb(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const v = Number(localStorage.getItem(key));
+    return Number.isFinite(v) && v >= min ? Math.min(v, max) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 超过该大小（MB）进入「保护模式」：关闭语法高亮、折叠、括号联动与诊断，仍可编辑。默认 2MB。 */
+export function getLargeFileMb(): number {
+  return readMb(LARGE_MB_KEY, 2, 0.1, 200);
+}
+
+/** 超过该大小（MB）拒绝在应用内编辑，引导用外部工具。默认 50MB，硬上限 256MB。 */
+export function getMaxEditMb(): number {
+  return readMb(MAX_MB_KEY, 50, 1, 256);
+}
+
+export function setEditorSizeLimits(largeMb: number, maxMb: number): void {
+  try {
+    localStorage.setItem(LARGE_MB_KEY, String(largeMb));
+    localStorage.setItem(MAX_MB_KEY, String(Math.max(maxMb, largeMb)));
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 const WRAP_KEY = "mf-pref-editor-wrap";
 
 /** 源码模式（含 .txt / 日志等纯文本）是否自动换行，默认开启 */

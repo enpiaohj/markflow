@@ -43,9 +43,12 @@
 ### ✍️ 原生编辑
 
 - **Markdown 可视化模式**：Word 式分页画布（Tiptap / ProseMirror），标题、列表、任务列表、表格、引用、代码块、图片；Markdown 文件本身是唯一真源。
-- **源码模式**（CodeMirror 6）：Markdown / JSON / YAML 语法高亮；两种模式随时互切。
-- **保存闭环**：`Ctrl + S` 保存；临时文件 + fsync + 原子替换；保存前自动快照（每文件保留 20 个版本，可随时恢复）。
+- **源码模式**（CodeMirror 6）：Markdown / JS·TS / Python / HTML / CSS / SQL / PowerShell / C# / Shell / Dockerfile / JSON(C) / YAML / XML / INI / TOML 等语法高亮，语言按文件名 → 扩展名 → Shebang 自动识别，状态栏可手动切换；两种模式随时互切。
+- **语法诊断**：JSON / JSONC / YAML / XML 实时校验并精确定位到行列，「问题」面板一键跳转。
+- **只读检测与大文件保护**：磁盘只读文件禁止保存并提示；超过阈值的大文件自动降级（关高亮 / 折叠 / 诊断）保证流畅，阈值可在设置中调整。
+- **保存闭环**：`Ctrl + S` 保存；临时文件 + fsync + 原子替换；保存前自动快照（每文件保留 20 个版本，可随时恢复）；编码与换行符默认原样保留，也可在状态栏显式选择转换。
 - **外部冲突检测**：文件被其他程序修改后保存会弹出三选一（覆盖保存 / 重新载入 / 取消）。
+- **外部工具**：一键用 VS Code / PowerShell / CMD / 资源管理器打开当前文件或所在目录。
 - 文本 / 代码 / JSON / YAML / XML / 配置 / CSV 均可直接编辑。
 
 ### 📄 PDF 与 Office

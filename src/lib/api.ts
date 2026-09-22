@@ -46,6 +46,17 @@ export function saveImageBytes(libraryId: string, parentDir: string, stem: strin
   });
 }
 
+/** 用外部工具打开文档库内的文件 / 目录（路径以参数数组传递，中文 / 空格安全） */
+export type ExternalTool = "vscode-file" | "vscode-folder" | "powershell" | "cmd" | "explorer";
+
+export function openWithExternal(libraryId: string, relativePath: string, tool: ExternalTool): Promise<void> {
+  return invoke("open_with_external", { libraryId, relativePath, tool });
+}
+
+export function vscodeAvailable(): Promise<boolean> {
+  return invoke("vscode_available");
+}
+
 /** 外壳偏好：关闭时最小化到通知区域、开机启动（以注册表为准） */
 export function getShellPrefs(): Promise<{ closeToTray: boolean; autostart: boolean }> {
   return invoke("get_shell_prefs");
@@ -181,8 +192,8 @@ export function clearFinishedTasks(): Promise<number> {
 // 原生编辑（v0.2）
 // ---------------------------------------------------------------------------
 
-export function readTextFile(libraryId: string, relativePath: string): Promise<TextFileContent> {
-  return invoke("read_text_file", { libraryId, relativePath });
+export function readTextFile(libraryId: string, relativePath: string, maxBytes?: number): Promise<TextFileContent> {
+  return invoke("read_text_file", { libraryId, relativePath, maxBytes });
 }
 
 export function saveTextFile(
@@ -191,8 +202,18 @@ export function saveTextFile(
   content: string,
   baseMtime: number,
   force: boolean,
+  /** 仅用户显式选择「转换编码 / 换行符」时传入；默认按磁盘原样写回 */
+  convert?: { encoding?: string | null; eol?: "crlf" | "lf" | null },
 ): Promise<SaveOutcome> {
-  return invoke("save_text_file", { libraryId, relativePath, content, baseMtime, force });
+  return invoke("save_text_file", {
+    libraryId,
+    relativePath,
+    content,
+    baseMtime,
+    force,
+    encodingOverride: convert?.encoding ?? null,
+    eolOverride: convert?.eol ?? null,
+  });
 }
 
 export function listFileVersions(libraryId: string, relativePath: string): Promise<VersionInfo[]> {

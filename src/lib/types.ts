@@ -89,6 +89,10 @@ export interface TextFileContent {
   size: number;
   /** 检测到的磁盘编码（UTF-8 / UTF-8 BOM / UTF-16 / GBK），保存时按原编码写回 */
   encoding: string;
+  /** 磁盘文件带只读属性 */
+  readOnly: boolean;
+  /** 磁盘文件以 CRLF 为主 */
+  crlf: boolean;
 }
 
 /** 保存/恢复结果 */
