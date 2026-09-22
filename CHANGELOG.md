@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-22
+
 ### Added
 
 - **详情面板文档预览**：右侧详情面板底部新增「预览」区——图片显示图片本体、PDF 渲染首页、文本类
