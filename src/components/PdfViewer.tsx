@@ -484,7 +484,7 @@ export default function PdfViewer({ external }: { external?: { bytes: ArrayBuffe
             <button
               type="button"
               onClick={() => openInViewer(rel, "office", undefined, { preferText: true })}
-              title="切换到文本快速预览（提取文字，可转换为可编辑文档）"
+              title="切换到文本快速预览（提取文字，可转换为 Markdown）"
               className="flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-600 hover:bg-gray-50"
             >
               文本预览 / 转换

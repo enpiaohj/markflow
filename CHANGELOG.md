@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 「转换为可编辑文档」改名为「转换为 Markdown」（按钮、对话框标题、相关提示统一），明确转换的目标格式；
+  转换确认框新增提示：Markdown 是纯文本格式，文字颜色 / 字体 / 字号 / 对齐方式 / 页面版式等视觉格式不会保留
+  （标题、加粗斜体、表格、链接、图片会保留），装有 Office / LibreOffice 时提示可改用版式预览按原样查看。
+
 ## [0.7.1] - 2026-09-22
 
 ### Fixed

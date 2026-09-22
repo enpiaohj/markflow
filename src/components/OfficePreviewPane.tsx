@@ -235,7 +235,7 @@ export default function OfficePreviewPane() {
               className="flex h-8 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-medium text-white hover:bg-primary-700 disabled:opacity-50"
             >
               {converting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileEdit className="h-3.5 w-3.5" />}
-              转换为可编辑文档
+              转换为 Markdown
             </button>
           )}
           {(kind === "word" || kind === "powerpoint") && (
@@ -322,7 +322,7 @@ export default function OfficePreviewPane() {
       {precheck && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
           <div className="w-[480px] rounded-2xl bg-white p-6 shadow-2xl">
-            <h3 className="text-[15px] font-semibold text-gray-900">转换为可编辑文档</h3>
+            <h3 className="text-[15px] font-semibold text-gray-900">转换为 Markdown</h3>
             {!precheck.ok ? (
               <>
                 <p className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5 text-[13px] text-red-600">

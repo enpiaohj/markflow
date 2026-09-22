@@ -552,7 +552,7 @@ export default function SettingsView() {
             {components === null && <p className="px-4 py-3.5 text-xs text-gray-400">正在检测组件…</p>}
           </SettingGroup>
           <p className="text-[11px] leading-relaxed text-gray-400">
-            未安装的组件不影响文档库核心能力：安装 Pandoc 后可用「转换为可编辑文档」与 DOCX / HTML 导入；安装 LibreOffice 后可作为 Office 版式预览的备选引擎；Edge 用于 PDF 交付。
+            未安装的组件不影响文档库核心能力：安装 Pandoc 后可用「转换为 Markdown」与 DOCX / HTML 导入；安装 LibreOffice 后可作为 Office 版式预览的备选引擎；Edge 用于 PDF 交付。
           </p>
         </>
       );
