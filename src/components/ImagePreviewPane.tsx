@@ -107,7 +107,17 @@ export default function ImagePreviewPane() {
           {loading ? (
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           ) : error ? (
-            <p className="max-w-md break-all text-center text-sm text-gray-500">{error}</p>
+            <div className="flex flex-col items-center gap-3">
+              <p className="max-w-md break-all text-center text-sm text-gray-500">{error}</p>
+              <button
+                type="button"
+                onClick={() => current && void api.openPathInSystem(current.id, rel)}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                使用系统应用打开
+              </button>
+            </div>
           ) : (
             <img
               src={url}

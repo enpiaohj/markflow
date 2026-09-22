@@ -291,6 +291,22 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// PDF / 图片查看的整文件读取上限：超过此大小一次性读入内存并经 IPC 传输会明显拖慢界面，
+/// 极端情况下（如误把大型视频、镜像文件改了扩展名）可能耗尽内存；超限后引导使用系统应用打开。
+const MAX_BINARY_READ_BYTES: u64 = 300 * 1024 * 1024;
+
+/// 超限检查：抽成纯函数便于单元测试，避免真的构造一个 300MB 文件。
+fn check_binary_read_size(len: u64) -> Result<(), String> {
+    if len > MAX_BINARY_READ_BYTES {
+        return Err(format!(
+            "文件过大（{:.0} MB），超过查看上限（{:.0} MB），请使用系统应用打开",
+            len as f64 / 1024.0 / 1024.0,
+            MAX_BINARY_READ_BYTES as f64 / 1024.0 / 1024.0
+        ));
+    }
+    Ok(())
+}
+
 /// 读取已登记文件的原始字节（供 PDF.js 等前端渲染器使用，二进制 IPC）。
 #[tauri::command]
 fn read_file_bytes(
@@ -311,9 +327,24 @@ fn read_file_bytes(
     }
     let root = library::get_library(&conn, &library_id)?.root_path;
     drop(conn);
-    let bytes = std::fs::read(std::path::Path::new(&root).join(&relative_path))
-        .map_err(|e| format!("读取文件失败: {e}"))?;
+    let path = std::path::Path::new(&root).join(&relative_path);
+    let meta = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    check_binary_read_size(meta.len())?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod read_file_bytes_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_only_past_the_cap() {
+        assert!(check_binary_read_size(MAX_BINARY_READ_BYTES).is_ok());
+        let err = check_binary_read_size(MAX_BINARY_READ_BYTES + 1).unwrap_err();
+        assert!(err.contains("300 MB") || err.contains("超过查看上限"));
+        assert!(err.contains("使用系统应用打开"));
+    }
 }
 
 /// 使用系统默认应用打开已登记文件（Word/Excel/WPS 等）。

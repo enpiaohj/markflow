@@ -31,6 +31,14 @@ import type { FileEntry, LibraryMeta } from "../lib/types";
 
 type SortKey = "name" | "mtime" | "size";
 
+/**
+ * 单个目录一次渲染的条目上限：目录树与中央列表都不做虚拟滚动，一个文件夹里几万个条目
+ * 会直接生成对应数量的 DOM 节点，导致界面明显卡顿甚至短暂无响应。超出后只渲染前
+ * MAX_LIST_RENDER 项并给出提示——文档库的主要查找方式是全文 / 文件名搜索，不依赖
+ * 在超大文件夹里逐条滚动。
+ */
+const MAX_LIST_RENDER = 2000;
+
 /** 激活其他库后需要延后执行的动作可用的回调（取自新库渲染后的最新版本） */
 interface PendingHandlers {
   handleSelect: (entry: FileEntry) => void;
@@ -114,9 +122,14 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
               加载中…
             </p>
           )}
-          {children?.map((child) => (
+          {children?.slice(0, MAX_LIST_RENDER).map((child) => (
             <TreeNode key={child.relativePath} entry={child} depth={depth + 1} ctx={ctx} />
           ))}
+          {children && children.length > MAX_LIST_RENDER && (
+            <p className="py-1 text-xs text-gray-400" style={{ paddingLeft: `${(depth + 1) * 14 + 26}px` }}>
+              还有 {(children.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -237,7 +250,16 @@ function LibrarySection({
         {treeRoot.length === 0 ? (
           <p className="py-2 text-center text-xs text-gray-400">（空）</p>
         ) : (
-          treeRoot.map((entry) => <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />)
+          <>
+            {treeRoot.slice(0, MAX_LIST_RENDER).map((entry) => (
+              <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />
+            ))}
+            {treeRoot.length > MAX_LIST_RENDER && (
+              <p className="py-1 pl-2 text-xs text-gray-400">
+                还有 {(treeRoot.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+              </p>
+            )}
+          </>
         )}
       </div>
     );
@@ -287,7 +309,16 @@ function LibrarySection({
           {treeRoot.length === 0 ? (
             <p className="py-1 pl-4 text-xs text-gray-400">（空）</p>
           ) : (
-            treeRoot.map((entry) => <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />)
+            <>
+              {treeRoot.slice(0, MAX_LIST_RENDER).map((entry) => (
+                <TreeNode key={entry.relativePath} entry={entry} depth={0} ctx={ctx} />
+              ))}
+              {treeRoot.length > MAX_LIST_RENDER && (
+                <p className="py-1 pl-4 text-xs text-gray-400">
+                  还有 {(treeRoot.length - MAX_LIST_RENDER).toLocaleString()} 项未显示，请用搜索定位
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -881,7 +912,7 @@ export default function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {sortedList.map((entry) => (
+                {sortedList.slice(0, MAX_LIST_RENDER).map((entry) => (
                   <tr
                     key={entry.relativePath}
                     onClick={() => setSelected(entry)}
@@ -920,6 +951,12 @@ export default function LibraryView() {
             </table>
           )}
         </div>
+        {sortedList.length > MAX_LIST_RENDER && (
+          <div className="flex items-center gap-2 border-t border-gray-200 bg-amber-50 px-4 py-1.5 text-[11px] text-amber-700">
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+            此文件夹共 {sortedList.length.toLocaleString()} 项，为保证流畅仅显示前 {MAX_LIST_RENDER.toLocaleString()} 项，其余请用搜索定位
+          </div>
+        )}
       </section>
 
       {/* 右侧：详情面板 */}
