@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- TXT 等纯文本文档的图标由灰色「T」色块改为 Windows 11 文本文档风格的纸页图标
+  （白色页面 + 蓝色文字行 + 右上折角），目录树、文件列表、详情面板、标签页等处统一生效。
+
 ## [0.10.0] - 2026-09-22
 
 ### Added
