@@ -12,6 +12,7 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
+  User,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -559,7 +560,10 @@ export default function SettingsView() {
               <span className="tabular-nums text-gray-800">{version ? `v${version}` : "—"}</span>
             </AboutRow>
             <AboutRow label="开发者">
-              <span className="text-gray-800">enpiaohj</span>
+              <span className="inline-flex items-center gap-1 text-gray-800">
+                <User className="h-3.5 w-3.5 text-gray-400" />
+                enpiaohj
+              </span>
               <ExternalLink href="https://github.com/enpiaohj">（GitHub）</ExternalLink>
             </AboutRow>
             <AboutRow label="源码仓库">
