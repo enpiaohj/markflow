@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-22
+
+### Fixed
+
+- **Excel「套用表格格式」（插入表格）工作簿打开后筛选按钮形同消失**：这类工作簿的筛选范围记在
+  `xl/tables/tableN.xml` 表格定义里，而不是工作表本身的 `<autoFilter>` 节点上，此前只读取后者，
+  导致这类很常见的报表打开后筛选功能一直处于「未检测到」状态。现在工作表本身没有筛选范围时会回退
+  读取其引用的表格定义；用真实用户文件（5 个工作表均用表格）验证过修复前后差异。
+- **Excel 原生表格视图解析失败时显示原始 zip 报错**（如 `OOXML 包打开失败: invalid Zip archive:
+  Could not find EOCD`，常见于误把旧版 .xls / 已损坏文件当作 .xlsx 打开）：改用 Word / PowerPoint
+  预览早已接入的 `friendlyOfficeError()` 统一转换为可读的中文提示，不再直接展示底层报错。
+
 ## [0.8.0] - 2026-09-22
 
 ### Added
