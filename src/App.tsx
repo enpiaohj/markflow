@@ -99,7 +99,7 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 视图切换请求：切换/创建文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
+  // 视图切换请求：切换/添加文档库 → 文档库；标题栏搜索框 / Ctrl+K → 搜索
   useEffect(() => {
     if (viewRequest.nonce > 0) selectView(viewRequest.target);
     // 仅响应 viewRequest 变化

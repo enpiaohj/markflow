@@ -17,7 +17,7 @@ import type { QuickScanResult } from "../lib/types";
 import { formatSize } from "../lib/format";
 import { useLibrary } from "./LibraryContext";
 
-const STEPS = ["选择文件夹", "索引设置", "确认创建"] as const;
+const STEPS = ["选择文件夹", "索引设置", "确认添加"] as const;
 
 function Switch({
   checked,
@@ -64,7 +64,7 @@ function PrivacyPoint({ icon: Icon, title, description }: { icon: typeof Zap; ti
 
 /**
  * 建库向导（设计文档 §6.2，概念图「创建文档库向导」）：
- * ① 选择文件夹（轻量扫描预览）→ ② 索引设置 → ③ 确认创建。
+ * ① 选择文件夹（轻量扫描预览）→ ② 索引设置 → ③ 确认添加。
  * MarkFlow 只读取文件内容做索引，不移动、不复制、不修改任何文件。
  */
 export default function CreateLibraryWizard() {
@@ -177,9 +177,9 @@ export default function CreateLibraryWizard() {
         {/* 头部与步骤条 */}
         <div className="flex items-start justify-between px-7 pt-6">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">创建文档库</h2>
+            <h2 className="text-lg font-semibold text-gray-900">添加文档库</h2>
             <p className="mt-0.5 text-[13px] text-gray-500">
-              选择本地文件夹，配置索引设置，快速创建专属文档库
+              选择本地文件夹，配置索引设置，快速添加专属文档库
             </p>
           </div>
           <button
@@ -356,7 +356,7 @@ export default function CreateLibraryWizard() {
           {step === 2 && (
             <div className="grid grid-cols-[1fr_260px] gap-6">
               <div>
-                <p className="text-sm font-medium text-gray-700">创建摘要</p>
+                <p className="text-sm font-medium text-gray-700">摘要</p>
                 <label className="mt-3 block text-[13px] text-gray-500">文档库名称（必填，用于在多个库之间区分）</label>
                 <input
                   type="text"
@@ -407,7 +407,7 @@ export default function CreateLibraryWizard() {
                 />
                 <PrivacyPoint icon={ShieldCheck} title="无需上传" description="所有处理都在本地完成，数据始终在本设备上。" />
                 <PrivacyPoint icon={Lock} title="安全可控" description="不连接云端，不上传任何文件，完全由您掌控。" />
-                <PrivacyPoint icon={Zap} title="快速创建" description="配置完成后即开始后台索引，支持随时调整设置。" />
+                <PrivacyPoint icon={Zap} title="快速添加" description="配置完成后即开始后台索引，支持随时调整设置。" />
               </aside>
             </div>
           )}
@@ -442,7 +442,7 @@ export default function CreateLibraryWizard() {
               className="flex h-9 items-center gap-2 rounded-lg bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-60"
             >
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-              创建文档库
+              添加文档库
             </button>
           )}
         </div>

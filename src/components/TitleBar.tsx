@@ -111,7 +111,7 @@ export default function TitleBar() {
                 文档库（{libraries.length}）
               </p>
               {libraries.length === 0 && (
-                <p className="px-3 py-2 text-[13px] text-gray-400">尚未创建文档库</p>
+                <p className="px-3 py-2 text-[13px] text-gray-400">尚未添加文档库</p>
               )}
               {libraries.map((lib) => (
                 <div
@@ -165,7 +165,7 @@ export default function TitleBar() {
                 className="flex w-full items-center gap-2 rounded-lg px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50"
               >
                 <FolderPlus className="h-4 w-4 text-primary-600" />
-                创建文档库…
+                添加文档库…
               </button>
             </div>
           </>

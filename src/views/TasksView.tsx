@@ -86,7 +86,7 @@ export default function TasksView() {
         <div className="mt-6 flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 text-gray-400">
           <ListTodo className="h-8 w-8" />
           <p className="mt-3 text-sm">暂无后台任务</p>
-          <p className="mt-1 text-xs">创建文档库或文件变化触发重扫时，任务会出现在这里</p>
+          <p className="mt-1 text-xs">添加文档库或文件变化触发重扫时，任务会出现在这里</p>
         </div>
       ) : (
         <ul className="mt-4 mb-6 min-h-0 flex-1 overflow-y-auto divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">

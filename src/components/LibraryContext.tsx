@@ -72,7 +72,7 @@ interface LibraryContextValue {
   settingsSection: string | null;
   openSettingsSection: (section: string) => void;
   clearSettingsSection: () => void;
-  /** 视图切换请求（切换/创建文档库、点击标题栏搜索框、Ctrl+K 时发出） */
+  /** 视图切换请求（切换/添加文档库、点击标题栏搜索框、Ctrl+K 时发出） */
   viewRequest: { target: ViewRequestTarget; nonce: number };
   /** 打开的文档标签页（按打开顺序）与当前激活的标签（null = 显示主视图） */
   tabs: DocTab[];

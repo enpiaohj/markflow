@@ -33,7 +33,7 @@ export default function HomeView() {
           className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
         >
           <FolderPlus className="h-4 w-4" />
-          创建文档库
+          添加文档库
         </button>
         <button
           type="button"
@@ -66,7 +66,7 @@ export default function HomeView() {
         <div className="rounded-xl border border-dashed border-gray-200 px-6 py-10 text-center">
           <p className="text-sm text-gray-500">还没有文档库</p>
           <p className="mt-1 text-xs leading-relaxed text-gray-400">
-            创建文档库后，MarkFlow 会以普通文件夹为基础建立统一索引，
+            添加文档库后，MarkFlow 会以普通文件夹为基础建立统一索引，
             <br />
             文件保持原位置、无需上传。
           </p>
@@ -134,7 +134,7 @@ export default function HomeView() {
       <p className="mt-auto pt-8 text-center text-xs leading-relaxed text-gray-400">
         本地优先：文件始终保存在原位置，MarkFlow 只保存索引与元数据。
         <br />
-        可通过「文件 → 打开文件」直接编辑任意文件，也可创建文档库获得统一搜索与管理。
+        可通过「文件 → 打开文件」直接编辑任意文件，也可添加文档库获得统一搜索与管理。
       </p>
     </div>
   );

@@ -194,7 +194,7 @@ export default function MenuBar() {
           })),
         },
         { separator: true },
-        { label: "新建文档库…", onClick: openWizard },
+        { label: "添加文档库…", onClick: openWizard },
         { label: "新建文档", shortcut: "Ctrl+N", onClick: () => void newDocument(), disabled: !current },
         { separator: true },
         { label: "保存", shortcut: "Ctrl+S", onClick: save, disabled: !openFile },

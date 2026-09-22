@@ -629,7 +629,7 @@ export default function LibraryView() {
           onClick={openWizard}
           className="mt-6 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700"
         >
-          创建文档库
+          添加文档库
         </button>
       </div>
     );
