@@ -9,6 +9,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
 
+  test: {
+    // 默认扫描整个项目会连本地 Release 快照（releases/vX.Y.Z/source/ 下的源码副本）里的
+    // 同名测试也跑一遍，用例被重复计数；快照本身已被 .gitignore 排除，这里同样排除。
+    exclude: ["**/node_modules/**", "**/dist/**", "**/src-tauri/**", "**/releases/**"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

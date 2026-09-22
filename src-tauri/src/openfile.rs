@@ -148,25 +148,33 @@ fn find_or_create_adhoc(conn: &Connection, parent: &str, file_name: &str) -> Res
             id
         }
     };
-    // 登记该文件到隐式库的文件清单
-    let meta = library::get_library(conn, &id)?;
+    register_adhoc_file(conn, &id, file_name)?;
+    library::get_library(conn, &id)
+}
+
+/// 登记文件名到单文件模式隐式库的白名单（`settings.files`）：只有在此白名单里的文件名，
+/// 后台全量重扫才会当作「仍然存在」保留在索引里，否则下一次重扫会把它当成「已消失」删掉
+/// （即使刚被 `ensure_indexed` 插入）。转换 / 导入等在单文件模式下新生成副本文件时必须一并登记。
+pub fn register_adhoc_file(conn: &Connection, library_id: &str, file_name: &str) -> Result<(), String> {
+    let meta = library::get_library(conn, library_id)?;
     let mut files: Vec<String> = meta
         .settings
         .get("files")
         .and_then(|v| v.as_array())
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    if !files.iter().any(|f| f.eq_ignore_ascii_case(file_name)) {
-        files.push(file_name.to_string());
-        let mut settings = meta.settings.clone();
-        settings["files"] = json!(files);
-        conn.execute(
-            "UPDATE libraries SET settings_json = ?1 WHERE id = ?2",
-            params![settings.to_string(), id],
-        )
-        .map_err(|e| e.to_string())?;
+    if files.iter().any(|f| f.eq_ignore_ascii_case(file_name)) {
+        return Ok(());
     }
-    library::get_library(conn, &id)
+    files.push(file_name.to_string());
+    let mut settings = meta.settings.clone();
+    settings["files"] = json!(files);
+    conn.execute(
+        "UPDATE libraries SET settings_json = ?1 WHERE id = ?2",
+        params![settings.to_string(), library_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// 确保该文件在库索引中有记录（新建 / 刚被外部程序写入、尚未被监听重扫收录的文件）。
@@ -310,6 +318,56 @@ mod tests {
         // 内容已可编辑读取
         let read = crate::editor::read_text_file(&conn, &t1.library_id, "note.md").unwrap();
         assert!(read.content.contains("# n"));
+    }
+
+    /// 回归：单文件模式下生成新文件（如「转换为可编辑文档」的 .md 副本）必须一并登记进
+    /// `settings.files` 白名单，否则 `ensure_indexed` 刚插入的索引行会被随后的全量重扫
+    /// （只保留白名单内文件，见 `library::scan_library_locked`）当成「已消失」删掉，
+    /// 文件明明还在磁盘上却报「文件不存在: Query returned no rows」。
+    #[test]
+    fn adhoc_new_file_survives_subsequent_rescan_only_when_registered() {
+        let state = library::AppState(std::sync::Arc::new(std::sync::Mutex::new(db())));
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("方案.docx"), "docx 占位").unwrap();
+        let t = {
+            let conn = state.0.lock().unwrap();
+            resolve(&conn, &dir.path().join("方案.docx").to_string_lossy()).unwrap()
+        };
+        assert!(t.adhoc);
+
+        // 模拟转换产物：同目录下多出一个 .md 副本（真实场景由 Pandoc 生成）
+        std::fs::write(dir.path().join("方案.md"), "# 方案\n\n正文").unwrap();
+
+        // 反例：不登记白名单，直接插入索引 —— 随后的重扫（走生产用的 scan_library_locked，
+        // 会按 settings.files 白名单限制单文件库的扫描范围）会把它当「已消失」删掉
+        {
+            let conn = state.0.lock().unwrap();
+            let meta = library::get_library(&conn, &t.library_id).unwrap();
+            ensure_indexed(&conn, &meta, "方案.md").unwrap();
+            assert!(crate::editor::read_text_file(&conn, &t.library_id, "方案.md").is_ok());
+        }
+        let outcome = library::scan_library_locked(&state, &t.library_id, dir.path(), &[], library::ScanOptions::default()).unwrap();
+        assert_eq!(outcome.file_count, 1); // 只有原来登记过的 方案.docx
+        {
+            let conn = state.0.lock().unwrap();
+            assert!(
+                crate::editor::read_text_file(&conn, &t.library_id, "方案.md").is_err(),
+                "复现：未登记白名单时，重扫会把刚插入的文件再次删掉"
+            );
+        }
+
+        // 正例：登记白名单后，重扫应保留该文件（修复后 convert_docx_to_markdown 的实际做法）
+        {
+            let conn = state.0.lock().unwrap();
+            let meta = library::get_library(&conn, &t.library_id).unwrap();
+            register_adhoc_file(&conn, &t.library_id, "方案.md").unwrap();
+            ensure_indexed(&conn, &meta, "方案.md").unwrap();
+        }
+        let outcome = library::scan_library_locked(&state, &t.library_id, dir.path(), &[], library::ScanOptions::default()).unwrap();
+        assert_eq!(outcome.file_count, 2); // 方案.docx + 方案.md
+        let conn = state.0.lock().unwrap();
+        let read = crate::editor::read_text_file(&conn, &t.library_id, "方案.md").unwrap();
+        assert!(read.content.contains("正文"));
     }
 
     #[test]

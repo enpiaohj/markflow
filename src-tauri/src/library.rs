@@ -106,6 +106,8 @@ pub struct AppState(pub Arc<Mutex<Connection>>);
 
 /// 建表语句，独立出来便于单元测试在内存库上执行。
 pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
+    // WAL：写入不独占整库、不需要为每个事务重写回滚日志；对内存库无意义（sqlite 会忽略），忽略其错误。
+    let _ = conn.pragma_update(None, "journal_mode", "WAL");
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
         CREATE TABLE IF NOT EXISTS libraries (
@@ -138,7 +140,7 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             text              TEXT
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
-            file_id UNINDEXED, name, body, tokenize='trigram'
+            name, body, tokenize='trigram'
         );
         CREATE TABLE IF NOT EXISTS file_versions (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,7 +181,41 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_annotations_lib_path
             ON annotations(library_id, relative_path, created_at DESC);",
-    )
+    )?;
+    migrate_search_fts_to_rowid(conn)
+}
+
+/// 修复早期版本的 `search_fts` schema：`file_id` 曾是 UNINDEXED 列，按它做 `DELETE`（每次保存 /
+/// 重扫 / 外部文件被删除时都会触发）等价于全表扫描——库积累到几十万条正文记录后，
+/// 删除几百个文件就可能卡住数十秒甚至更久，界面因此被系统判定为「未响应」。
+/// 修复方式：把 `file_id` 改为 FTS5 表本身的 `rowid`（天然有索引，删除是 O(log n) 查找），
+/// `CREATE VIRTUAL TABLE IF NOT EXISTS` 对已存在的旧表是空操作，所以这里检测旧 schema 并按
+/// `extracted_content`（唯一可信来源）整体重建一次；只在检测到旧 schema 时执行，重建后不会再触发。
+fn migrate_search_fts_to_rowid(conn: &Connection) -> rusqlite::Result<()> {
+    let has_old_schema: bool = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'search_fts'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .map(|sql| sql.contains("file_id"))
+        .unwrap_or(false);
+    if !has_old_schema {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "DROP TABLE search_fts;
+         CREATE VIRTUAL TABLE search_fts USING fts5(name, body, tokenize='trigram');",
+    )?;
+    conn.execute(
+        "INSERT INTO search_fts (rowid, name, body)
+         SELECT ec.file_id, f.name, ec.text
+         FROM extracted_content ec
+         JOIN files f ON f.id = ec.file_id
+         WHERE ec.text IS NOT NULL",
+        [],
+    )?;
+    Ok(())
 }
 
 /// 打开（或创建）应用数据目录下的索引库。
@@ -292,7 +328,8 @@ pub fn create_library(
 
 pub fn get_library(conn: &Connection, id: &str) -> Result<LibraryMeta, String> {
     conn.query_row("SELECT * FROM libraries WHERE id = ?1", [id], row_to_library)
-        .map_err(|e| format!("文档库不存在: {e}"))
+        // 不透出底层数据库错误原文；该库可能已被移除或从未创建
+        .map_err(|_| "文档库不存在，可能已被移除，请重新打开或创建".to_string())
 }
 
 pub fn open_library(conn: &Connection, id: &str) -> Result<LibraryMeta, String> {
@@ -315,7 +352,7 @@ pub fn remove_library(conn: &Connection, id: &str) -> Result<(), String> {
         );
     }
     conn.execute(
-        "DELETE FROM search_fts WHERE file_id IN (SELECT id FROM files WHERE library_id = ?1)",
+        "DELETE FROM search_fts WHERE rowid IN (SELECT id FROM files WHERE library_id = ?1)",
         [id],
     )
     .map_err(|e| e.to_string())?;
@@ -551,8 +588,9 @@ fn store_extraction(conn: &Connection, file_id: i64, name: &str, status: &str, t
         params![file_id, status, text],
     );
     if let Some(body) = text {
+        // rowid 就是 file_id：删除按 rowid 走索引，避免早期 `file_id UNINDEXED` 列的全表扫描
         let _ = conn.execute(
-            "INSERT INTO search_fts (file_id, name, body) VALUES (?1, ?2, ?3)",
+            "INSERT INTO search_fts (rowid, name, body) VALUES (?1, ?2, ?3)",
             params![file_id, name, body],
         );
     }
@@ -567,7 +605,7 @@ pub(crate) fn index_file_content(conn: &Connection, file_path: &Path, file_id: i
 
 pub(crate) fn clear_extraction(conn: &Connection, file_id: i64) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM extracted_content WHERE file_id = ?1", params![file_id])?;
-    conn.execute("DELETE FROM search_fts WHERE file_id = ?1", params![file_id])?;
+    conn.execute("DELETE FROM search_fts WHERE rowid = ?1", params![file_id])?;
     Ok(())
 }
 
@@ -897,7 +935,8 @@ pub fn get_file_detail(conn: &Connection, library_id: &str, relative_path: &str)
         params![library_id, relative_path],
         row_to_file_entry,
     )
-    .map_err(|e| format!("文件不存在: {e}"))
+    // 不透出底层数据库错误原文（如 "Query returned no rows"），统一给出用户可理解的原因与下一步动作
+    .map_err(|_| "文件不存在于文档库索引，请刷新文档库后重试".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -940,8 +979,8 @@ pub fn search_library(conn: &Connection, library_id: &str, query: &str, limit: i
         let match_q = format!("\"{}\"", q.replace('"', "\"\""));
         let mut stmt = conn
             .prepare(
-                "SELECT f.*, snippet(search_fts, 2, '【', '】', '…', 16) AS snip
-                 FROM search_fts JOIN files f ON f.id = search_fts.file_id
+                "SELECT f.*, snippet(search_fts, 1, '【', '】', '…', 16) AS snip
+                 FROM search_fts JOIN files f ON f.id = search_fts.rowid
                  WHERE search_fts MATCH ?1 AND f.library_id = ?2 AND f.is_dir = 0
                  LIMIT ?3",
             )
@@ -1209,6 +1248,102 @@ mod tests {
 
         println!("[Spike] 完成。扫描 {:?} | 搜索 {:?} | 重建 {:?}",
             scan_elapsed, search_elapsed, t_rescan.elapsed());
+    }
+
+    /// 回归：早期 schema 用 `file_id UNINDEXED` 列，`DELETE ... WHERE file_id = ?` 等价于全表扫描；
+    /// 库大到几十万条正文记录时，删除几百个文件（如整个二级子目录被外部删除后重扫）会卡住数十秒甚至
+    /// 被系统判定为界面未响应。现在 `file_id` 即 `search_fts` 的 `rowid`（天然索引），删除应保持毫秒级，
+    /// 不随索引总量增长而变慢。
+    #[test]
+    fn deleting_files_stays_fast_regardless_of_total_index_size() {
+        let conn = memory_db();
+        // 直接灌入一个「空壳」库与十万条正文记录（不经过真实文件 I/O，只验证数据库层面的删除成本）
+        conn.execute(
+            "INSERT INTO libraries (id, root_path, name, file_count, created_at, last_opened_at, settings_json)
+             VALUES ('lib', 'C:/lib', '压力测试', 0, 0, 0, '{}')",
+            [],
+        )
+        .unwrap();
+        const TOTAL: i64 = 100_000;
+        const TO_DELETE: i64 = 500;
+        let tx = conn.unchecked_transaction().unwrap();
+        {
+            let mut ins_file = tx
+                .prepare("INSERT INTO files (id, library_id, relative_path, name, parent_path, is_dir, format, size, mtime) VALUES (?1, 'lib', ?2, ?2, '', 0, 'markdown', 10, 0)")
+                .unwrap();
+            for i in 0..TOTAL {
+                ins_file.execute(params![i, format!("f{i}.md")]).unwrap();
+            }
+        }
+        for i in 0..TOTAL {
+            store_extraction(&tx, i, &format!("f{i}.md"), "ok", Some(format!("正文内容 {i} 用于撑大索引占位占位占位")));
+        }
+        tx.commit().unwrap();
+        let total_before: i64 = conn.query_row("SELECT COUNT(*) FROM search_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(total_before, TOTAL);
+
+        let started = Instant::now();
+        for i in 0..TO_DELETE {
+            clear_extraction(&conn, i).unwrap();
+        }
+        let elapsed = started.elapsed();
+        println!("[Regression] 在 {TOTAL} 条索引中删除 {TO_DELETE} 个文件: {elapsed:?}");
+        assert!(
+            elapsed.as_millis() < 1000,
+            "删除耗时 {elapsed:?}，疑似又回退成了全表扫描（file_id 未走 rowid 索引）"
+        );
+
+        let total_after: i64 = conn.query_row("SELECT COUNT(*) FROM search_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(total_after, TOTAL - TO_DELETE);
+        // 未删除的记录仍可正常检索
+        let hits = search_library(&conn, "lib", "内容 99999", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.name, "f99999.md");
+    }
+
+    /// 回归：修复前的库文件里，`search_fts` 仍带独立的 `file_id UNINDEXED` 列；打开这样的旧库时
+    /// `run_migrations` 必须检测到旧 schema 并按 `extracted_content` 整体重建，重建后 rowid 与
+    /// file_id 一致、检索结果不变、不再需要迁移第二次。
+    #[test]
+    fn old_schema_database_is_migrated_and_search_still_works() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 手工建出「修复前」的最小 schema + 一条数据，模拟已经在用的旧库文件
+        conn.execute_batch(
+            "CREATE TABLE libraries (id TEXT PRIMARY KEY, root_path TEXT, name TEXT, file_count INTEGER,
+                created_at INTEGER, last_opened_at INTEGER, settings_json TEXT DEFAULT '{}');
+             CREATE TABLE files (id INTEGER PRIMARY KEY, library_id TEXT, relative_path TEXT, name TEXT,
+                parent_path TEXT, is_dir INTEGER DEFAULT 0, format TEXT, size INTEGER, mtime INTEGER);
+             CREATE TABLE extracted_content (file_id INTEGER PRIMARY KEY, extractor_version TEXT, status TEXT, text TEXT);
+             CREATE VIRTUAL TABLE search_fts USING fts5(file_id UNINDEXED, name, body, tokenize='trigram');
+             INSERT INTO libraries VALUES ('lib', 'C:/lib', '旧库', 1, 0, 0, '{}');
+             INSERT INTO files VALUES (1, 'lib', '笔记.md', '笔记.md', '', 0, 'markdown', 10, 0);
+             INSERT INTO extracted_content VALUES (1, 'v1', 'ok', '旧版正文关键词迁移验证');
+             INSERT INTO search_fts (file_id, name, body) VALUES (1, '笔记.md', '旧版正文关键词迁移验证');",
+        )
+        .unwrap();
+
+        // 打开时执行的迁移应检测旧 schema 并重建（不是简单地新增表结构）
+        run_migrations(&conn).unwrap();
+
+        let sql: String = conn
+            .query_row("SELECT sql FROM sqlite_master WHERE name = 'search_fts'", [], |r| r.get(0))
+            .unwrap();
+        assert!(!sql.contains("file_id"), "迁移后不应再有独立的 file_id 列: {sql}");
+
+        let rowid: i64 = conn.query_row("SELECT rowid FROM search_fts LIMIT 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(rowid, 1, "rowid 应等于原 file_id");
+
+        let hits = search_library(&conn, "lib", "迁移验证", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.name, "笔记.md");
+
+        // 删除应该走 rowid（新库正常写入路径）
+        clear_extraction(&conn, 1).unwrap();
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM search_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+
+        // 再跑一次迁移是幂等的（不会因为「表已是新 schema」而出错或重复重建）
+        run_migrations(&conn).unwrap();
     }
 
     #[test]

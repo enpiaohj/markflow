@@ -454,6 +454,11 @@ fn convert_docx_to_markdown(
         Some((parent, _)) => format!("{parent}/{}", out.md_relative_path),
         None => out.md_relative_path.clone(),
     };
+    if openfile::is_adhoc_library(&meta) {
+        // 单文件模式：随后的全量重扫只保留 settings.files 白名单里的文件，
+        // 不登记的话副本会被 ensure_indexed 插入索引、又立刻被这次重扫当成「已消失」删掉
+        openfile::register_adhoc_file(&state.0.lock().unwrap(), &library_id, &md_rel)?;
+    }
     openfile::ensure_indexed(&state.0.lock().unwrap(), &meta, &md_rel)?;
 
     // 副本入库：全量重扫（复用任务中心的扫描任务与事件；附件等其余文件由它收录）
@@ -989,7 +994,7 @@ async fn ocr_file(
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO search_fts (file_id, name, body) VALUES (?1, ?2, ?3)",
+            "INSERT INTO search_fts (rowid, name, body) VALUES (?1, ?2, ?3)",
             rusqlite::params![file_id, name, result.text],
         )
         .map_err(|e| e.to_string())?;
