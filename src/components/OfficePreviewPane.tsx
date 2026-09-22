@@ -359,6 +359,11 @@ export default function OfficePreviewPane() {
                   将在源文件同目录生成「同名 .md」可编辑副本（附件存入同名 .media 目录）。
                   <span className="font-medium text-gray-700">原文件不会被修改。</span>
                 </p>
+                <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700">
+                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Markdown 是纯文本格式：标题、加粗斜体、表格、链接、图片会保留；文字颜色、字体、字号、对齐方式、页面版式等视觉格式无法保留。
+                  {engine && "仅需保留原始版式时，可改用工具栏的版式预览查看原文件。"}
+                </p>
                 <div className="mt-5 flex justify-end gap-2">
                   <button
                     type="button"
