@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **详情面板文档预览**：右侧详情面板底部新增「预览」区——图片显示图片本体、PDF 渲染首页、文本类
+  （Markdown / 代码 / JSON / YAML / XML / 配置 / CSV）显示前 12 行摘录；Office 等其余格式不显示，
+  读取失败时静默跳过、不影响面板其余信息。新增「设置 → 外观 → 详情面板预览」开关（默认开启），
+  关注性能或低配设备可关闭。
+
+### Changed
+
+- 右键菜单「删除（进回收站）」简化为「删除」，行为不变（仍是移入系统回收站，可还原）。
+
 ## [0.9.1] - 2026-09-22
 
 ### Fixed

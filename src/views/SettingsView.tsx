@@ -35,6 +35,8 @@ import {
   setEditorWrap,
   setLibraryLayout,
   type LibraryLayoutPref,
+  getShowDetailsPreview,
+  setShowDetailsPreview,
   setAutosave,
   setOfficeEngine,
   setTheme,
@@ -116,6 +118,7 @@ export default function SettingsView() {
   const [maxMb, setMaxMb] = useState(getMaxEditMb());
   const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
   const [maxListRender, setMaxListRenderState] = useState(getMaxListRender());
+  const [detailsPreview, setDetailsPreviewState] = useState(getShowDetailsPreview());
   const [autosave, setAutosaveState] = useState(getAutosave());
   const [officeEngine, setOfficeEngineState] = useState<OfficeEnginePref>(getOfficeEngine());
   const [shell, setShell] = useState<{ closeToTray: boolean; autostart: boolean } | null>(null);
@@ -339,6 +342,28 @@ export default function SettingsView() {
               />
             )}
           </div>
+        </SettingRow>
+      ),
+    },
+    {
+      section: "appearance",
+      label: "详情面板预览",
+      description: "选择文件时在右侧详情面板显示预览：图片显示图片本体、PDF 显示首页、文本类显示前几行摘录；Office 等其余格式不显示。文件较多或低配设备可关闭以减少读取。",
+      keywords: "详情 预览 缩略图 缩略 图片 PDF 首页 摘录 性能 内存 开关",
+      node: (
+        <SettingRow
+          key="detailsPreview"
+          label="详情面板预览"
+          description="选择文件时在右侧详情面板显示预览：图片显示图片本体、PDF 显示首页、文本类显示前几行摘录；Office 等其余格式不显示。文件较多或低配设备可关闭以减少读取。"
+        >
+          <Toggle
+            label="详情面板预览"
+            checked={detailsPreview}
+            onChange={(v) => {
+              setShowDetailsPreview(v);
+              setDetailsPreviewState(v);
+            }}
+          />
         </SettingRow>
       ),
     },

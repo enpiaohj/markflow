@@ -145,6 +145,26 @@ export function setMaxListRender(value: number): void {
   }
 }
 
+const DETAILS_PREVIEW_KEY = "mf-pref-details-preview";
+
+/** 右侧详情面板是否显示所选文件的预览（图片 / PDF 首页 / 文本摘录），默认开启 */
+export function getShowDetailsPreview(): boolean {
+  try {
+    return localStorage.getItem(DETAILS_PREVIEW_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setShowDetailsPreview(on: boolean): void {
+  try {
+    localStorage.setItem(DETAILS_PREVIEW_KEY, on ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 const THEME_KEY = "mf-pref-theme";
 
 /** 主题：light 浅色（默认）/ dark 深色 / system 跟随系统 */

@@ -22,11 +22,12 @@ import {
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import LibraryManagePanel from "../components/LibraryManagePanel";
+import DetailsPreview from "../components/DetailsPreview";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
-import { getLibraryLayout, getMaxListRender, getOfficeEngine } from "../lib/prefs";
+import { getLibraryLayout, getMaxListRender, getOfficeEngine, getShowDetailsPreview } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
 import type { FileEntry, LibraryMeta } from "../lib/types";
 
@@ -338,6 +339,7 @@ export default function LibraryView() {
   const [importing, setImporting] = useState(false);
   const [layout, setLayout] = useState(getLibraryLayout());
   const [maxListRender, setMaxListRender] = useState(getMaxListRender());
+  const [showDetailsPreview, setShowDetailsPreview] = useState(getShowDetailsPreview());
   const [pickerOpen, setPickerOpen] = useState(false);
   /** 刚打开 / 切换到库、尚未有任何用户操作：根目录加载后默认定位到第一项 */
   const autoPickRef = useRef(false);
@@ -346,6 +348,7 @@ export default function LibraryView() {
     const f = () => {
       setLayout(getLibraryLayout());
       setMaxListRender(getMaxListRender());
+      setShowDetailsPreview(getShowDetailsPreview());
     };
     window.addEventListener("markflow:prefs-changed", f);
     return () => window.removeEventListener("markflow:prefs-changed", f);
@@ -1037,6 +1040,13 @@ export default function LibraryView() {
             <div className="rounded-lg border border-dashed border-gray-200 px-3 py-3 text-center text-xs text-gray-400">
               尚未建立关联，文档关联与关系图按路线图交付
             </div>
+
+            {showDetailsPreview && (
+              <>
+                <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">预览</p>
+                <DetailsPreview libraryId={current.id} entry={selected} />
+              </>
+            )}
           </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-gray-400">
@@ -1080,7 +1090,7 @@ export default function LibraryView() {
             <MenuItem icon={<Copy className="h-3.5 w-3.5" />} label="复制路径"
               onClick={() => { const e2 = menu.entry; const l = menu.lib; copyEntryPath(e2, l); }} />
             <MenuDivider />
-            <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="删除（进回收站）" danger
+            <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="删除" danger
               onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); void confirmDelete(e2, l); }} />
           </div>
         </>
