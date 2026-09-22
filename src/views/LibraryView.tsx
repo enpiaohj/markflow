@@ -18,6 +18,7 @@ import {
   TriangleAlert,
   X,
   Check,
+  Copy,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import LibraryManagePanel from "../components/LibraryManagePanel";
@@ -372,6 +373,24 @@ export default function LibraryView() {
   }, [current, selected]);
   /** 右键菜单位置与目标 */
   const [menu, setMenu] = useState<{ x: number; y: number; entry: FileEntry; lib: LibraryMeta } | null>(null);
+  /** 「复制路径」成功后的短暂提示 */
+  const [copiedTip, setCopiedTip] = useState(false);
+
+  /** 复制条目的绝对路径（Windows 风格分隔符），成功后短暂提示 */
+  function copyEntryPath(entry: FileEntry, lib: LibraryMeta) {
+    const root = lib.rootPath.replace(/\//g, "\\").replace(/\\+$/, "");
+    const abs = `${root}\\${entry.relativePath.replace(/\//g, "\\")}`;
+    setMenu(null);
+    void navigator.clipboard
+      .writeText(abs)
+      .then(() => {
+        setCopiedTip(true);
+        window.setTimeout(() => setCopiedTip(false), 1500);
+      })
+      .catch((err) => {
+        console.error("复制路径失败", err);
+      });
+  }
   /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动；`lib` 明确记录操作所属的文档库 */
   const [dialog, setDialog] = useState<
     | { kind: "new-file"; dir: string; lib: LibraryMeta }
@@ -1054,11 +1073,20 @@ export default function LibraryView() {
               onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); openRename(e2, l); }} />
             <MenuItem icon={<Import className="h-3.5 w-3.5" />} label="移动到…"
               onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); void openMove(e2, l); }} />
+            <MenuItem icon={<Copy className="h-3.5 w-3.5" />} label="复制路径"
+              onClick={() => { const e2 = menu.entry; const l = menu.lib; copyEntryPath(e2, l); }} />
             <MenuDivider />
             <MenuItem icon={<Trash2 className="h-3.5 w-3.5" />} label="删除（进回收站）" danger
               onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); void confirmDelete(e2, l); }} />
           </div>
         </>
+      )}
+
+      {/* 复制路径成功提示 */}
+      {copiedTip && (
+        <div className="fixed bottom-10 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-3 py-1.5 text-xs text-white shadow-lg">
+          路径已复制
+        </div>
       )}
 
       {/* 操作对话框（新建 / 重命名 / 移动） */}

@@ -92,6 +92,21 @@ pub fn load(path: &Path) -> Result<XlsxView, String> {
         return Err(format!("文件超过处理上限（{:.0} MB）", MAX_FILE_BYTES as f64 / 1024.0 / 1024.0));
     }
     let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    // 旧版 .xls 与加密的 Office 文件是 OLE2 复合文档（.xlsx 是 zip 包），提前按魔数识别并给出
+    // 可读提示，不让用户看到「缺少 xl/workbook.xml」这类内部结构报错
+    let mut magic = [0u8; 8];
+    let mut file = file;
+    match std::io::Read::read_exact(&mut file, &mut magic) {
+        Ok(()) if magic == [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1] => {
+            return Err(
+                "这是旧版 .xls 二进制格式（或已加密的 Office 文件），内置表格视图只支持 .xlsx。\
+                 可安装 LibreOffice 或 Microsoft Office 后使用工具栏的「打印版式预览」查看，\
+                 或使用系统应用打开，也可以在 Office 中另存为 .xlsx 后再打开。"
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("OOXML 包打开失败: {e}"))?;
 
     let theme = read(&mut zip, "xl/theme/theme1.xml").map(|x| parse_theme(&x)).unwrap_or_default();
@@ -1120,5 +1135,22 @@ mod tests {
 
         let v = load(&p).unwrap();
         assert_eq!(v.sheets[0].auto_filter, Some([5, 0, 6, 0]), "取自 xl/tables/table1.xml 的 A6:A7");
+    }
+
+    /// 旧版 .xls（OLE2 复合文档，魔数 D0 CF 11 E0 A1 B1 1A E1，与真实旧格式文件一致）应得到
+    /// 可读提示与建议操作，而不是「缺少 xl/workbook.xml」这类内部结构报错。
+    #[test]
+    fn legacy_ole2_file_gets_friendly_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("旧格式.xls");
+        let mut f = std::fs::File::create(&p).unwrap();
+        use std::io::Write as _;
+        f.write_all(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]).unwrap();
+        f.write_all(&[0u8; 32]).unwrap();
+        drop(f);
+        let err = load(&p).unwrap_err();
+        assert!(err.contains("旧版 .xls"), "实际错误：{err}");
+        assert!(err.contains("打印版式预览"), "应包含建议操作：{err}");
+        assert!(!err.contains("xl/workbook.xml"));
     }
 }

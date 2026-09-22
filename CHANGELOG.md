@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 侧栏目录树与中央文件列表的右键菜单新增「复制路径」：复制该文件 / 文件夹的 Windows 绝对路径，
+  复制成功后短暂提示。
+
+### Fixed
+
+- **旧版 .xls 文件打不开时报内部结构错误**：旧版二进制 .xls（以及已加密的 Office 文件）是 OLE2
+  复合文档而非 zip 包，此前会被当作 .xlsx 解析并报「缺少 xl/workbook.xml」。现在按文件魔数提前
+  识别，提示改用版式预览（需 LibreOffice / Office）、系统应用打开或另存为 .xlsx。
+
 ### Changed
 
 - 界面文案统一：「创建文档库 / 新建文档库」统一为「添加文档库」——各入口（开始页、文档库页、
