@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-24
+
 ### Security
 
 - **文档库内文件操作补上「不得越出库根」的统一校验**：此前只有「用外部工具打开」和「插入图片」校验相对路径，
