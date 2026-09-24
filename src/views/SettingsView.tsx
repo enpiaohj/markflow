@@ -10,7 +10,6 @@ import {
   Plus,
   Puzzle,
   Search,
-  SlidersHorizontal,
   Trash2,
   User,
   XCircle,
@@ -45,11 +44,10 @@ import {
 } from "../lib/prefs";
 import type { AiTestResult, ComponentStatus, ProviderConfig } from "../lib/types";
 
-type SectionId = "general" | "appearance" | "editor" | "preview" | "ai" | "components" | "about";
+type SectionId = "appearance" | "editor" | "preview" | "ai" | "components" | "about";
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; keywords: string }[] = [
-  { id: "general", label: "通用", icon: SlidersHorizontal, keywords: "启动 开机 自启 托盘 通知区域 关闭 最小化 后台" },
-  { id: "appearance", label: "外观", icon: Palette, keywords: "主题 深色 浅色 暗色 夜间 跟随系统 颜色" },
+  { id: "appearance", label: "外观与启动", icon: Palette, keywords: "主题 深色 浅色 暗色 夜间 跟随系统 颜色 启动 开机 自启 托盘 通知区域 关闭 最小化 后台" },
   { id: "editor", label: "编辑器", icon: PenLine, keywords: "自动保存 保存 草稿 换行 折行" },
   { id: "preview", label: "预览", icon: Eye, keywords: "Word PowerPoint Office 内置渲染 引擎 版式 docx pptx" },
   { id: "ai", label: "AI", icon: Bot, keywords: "provider 模型 密钥 api key 接口 大模型" },
@@ -67,6 +65,9 @@ const SHORTCUTS = [
   ["Ctrl + + / − / 0", "放大 / 缩小 / 实际大小（也可 Ctrl + 滚轮）"],
   ["F11", "全屏"],
 ];
+
+/** 「外观与启动」页里，启动与窗口行为单独成组 */
+const STARTUP_LABELS = new Set(["开机启动", "关闭窗口时最小化到通知区域"]);
 
 interface SimpleRow {
   section: SectionId;
@@ -101,7 +102,7 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
 export default function SettingsView() {
   const dialog = useDialog();
   const { settingsSection, clearSettingsSection } = useLibrary();
-  const [section, setSection] = useState<SectionId>("general");
+  const [section, setSection] = useState<SectionId>("appearance");
   const [query, setQuery] = useState("");
 
   // 外部请求直接定位到某个分类（如帮助菜单「关于」），消费后清空，不影响后续正常导航
@@ -233,7 +234,7 @@ export default function SettingsView() {
 
   const rows: SimpleRow[] = [
     {
-      section: "general",
+      section: "appearance",
       label: "开机启动",
       description: AUTOSTART_DESC,
       keywords: "自启 登录 启动 autostart",
@@ -244,7 +245,7 @@ export default function SettingsView() {
       ),
     },
     {
-      section: "general",
+      section: "appearance",
       label: "关闭窗口时最小化到通知区域",
       description: TRAY_DESC,
       keywords: "托盘 tray 关闭 最小化 后台 通知区域",
@@ -284,14 +285,14 @@ export default function SettingsView() {
     {
       section: "appearance",
       label: "文档库列表",
-      description: "单库：左侧顶部用选择器切换文档库，只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。",
-      keywords: "文档库 布局 选择器 并列 多库 折叠 侧栏",
+      description: "单库：用标题栏的库名切换文档库，左侧只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。",
+      keywords: "文档库 布局 选择器 单库 并列 多库 折叠 侧栏",
       node: (
-        <SettingRow key="layout" label="文档库列表" description="单库：左侧顶部用选择器切换文档库，只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。">
+        <SettingRow key="layout" label="文档库列表" description="单库：用标题栏的库名切换文档库，左侧只显示当前库的目录树；并列：所有已打开的库并排显示，可折叠。">
           <Segmented
             value={layout}
             options={[
-              { key: "selector", label: "单库（选择器）" },
+              { key: "selector", label: "单库" },
               { key: "side", label: "并列多库" },
             ]}
             onChange={(v) => {
@@ -305,13 +306,13 @@ export default function SettingsView() {
     {
       section: "appearance",
       label: "单个文件夹显示上限",
-      description: "目录树与中央列表都会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。",
+      description: "中央文件列表（并列布局下的目录树也一样）会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。",
       keywords: "文件夹 文件数 上限 卡顿 性能 虚拟滚动 渲染 不限",
       node: (
         <SettingRow
           key="maxListRender"
           label="单个文件夹显示上限"
-          description="目录树与中央列表都会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。"
+          description="中央文件列表（并列布局下的目录树也一样）会一次性渲染文件夹里的所有条目；文件夹超大时（几千项以上）会明显卡顿，超出上限的部分不显示，可用搜索定位。也可选择不限，但超大文件夹可能卡顿。"
         >
           <div className="flex items-center gap-2">
             <Segmented
@@ -672,6 +673,15 @@ export default function SettingsView() {
               </div>
             ))}
           </SettingGroup>
+        </>
+      );
+    }
+    if (id === "appearance") {
+      const mine = rows.filter((r) => r.section === id);
+      return (
+        <>
+          <SettingGroup title="启动与窗口">{mine.filter((r) => STARTUP_LABELS.has(r.label)).map((r) => r.node)}</SettingGroup>
+          <SettingGroup title="外观">{mine.filter((r) => !STARTUP_LABELS.has(r.label)).map((r) => r.node)}</SettingGroup>
         </>
       );
     }

@@ -112,6 +112,11 @@ function TreeNode({ entry, depth, ctx }: { entry: FileEntry; depth: number; ctx:
               加载中…
             </p>
           )}
+          {children && children.length === 0 && (
+            <p className="py-1 text-xs text-gray-400" style={{ paddingLeft: `${(depth + 1) * 14 + 26}px` }}>
+              无子文件夹
+            </p>
+          )}
           {children?.slice(0, ctx.maxRender).map((child) => (
             <TreeNode key={child.relativePath} entry={child} depth={depth + 1} ctx={ctx} />
           ))}
@@ -176,7 +181,8 @@ function LibrarySection({
 
   const load = useCallback(async (dir: string): Promise<FileEntry[]> => {
     try {
-      return await api.listChildren(lib.id, dir);
+      // 目录树只显示文件夹（文件在中央列表里看，避免两处重复）
+      return (await api.listChildren(lib.id, dir)).filter((e) => e.isDir);
     } catch (err) {
       console.error("加载目录失败", err);
       return [];
@@ -226,6 +232,24 @@ function LibrarySection({
     void load(revealPath).then((entries) => setCache((prev) => new Map(prev).set(revealPath, entries)));
   }, [revealPath, load]);
 
+  // 当前目录变化（如在中央列表双击进入子文件夹、搜索定位）→ 自动展开其各级上层目录，树始终反映当前位置
+  useEffect(() => {
+    if (!expanded || !selectedPath) return;
+    const parts = selectedPath.split("/");
+    const ancestors = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+    if (ancestors.length === 0) return;
+    setDirExpanded((prev) => {
+      if (ancestors.every((p) => prev.has(p))) return prev;
+      const next = new Set(prev);
+      ancestors.forEach((p) => next.add(p));
+      return next;
+    });
+    for (const p of ancestors) {
+      if (cacheRef.current.has(p)) continue;
+      void load(p).then((entries) => setCache((prev) => (prev.has(p) ? prev : new Map(prev).set(p, entries))));
+    }
+  }, [expanded, selectedPath, load]);
+
   const ctx: TreeCtx = {
     expanded: dirExpanded,
     cache,
@@ -240,8 +264,19 @@ function LibrarySection({
   if (flat) {
     return (
       <div>
+        {/* 库根目录：树里只有文件夹，回到最上层需要一个入口 */}
+        <button
+          type="button"
+          onClick={onActivate}
+          className={`mb-0.5 flex w-full items-center gap-1.5 rounded-md py-1.5 pl-2 pr-2 text-left text-[13px] transition-colors ${
+            selectedPath === "" ? "bg-primary-50 text-primary-700" : "text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <FolderOpen className={`h-4 w-4 shrink-0 ${selectedPath === "" ? "text-primary-600" : "text-gray-400"}`} />
+          <span className="truncate font-medium">全部文件</span>
+        </button>
         {treeRoot.length === 0 ? (
-          <p className="py-2 text-center text-xs text-gray-400">（空）</p>
+          <p className="py-2 text-center text-xs text-gray-400">没有子文件夹</p>
         ) : (
           <>
             {treeRoot.slice(0, maxRender).map((entry) => (
@@ -300,7 +335,7 @@ function LibrarySection({
       {expanded && (
         <div className="ml-2 border-l border-gray-100 pl-1">
           {treeRoot.length === 0 ? (
-            <p className="py-1 pl-4 text-xs text-gray-400">（空）</p>
+            <p className="py-1 pl-4 text-xs text-gray-400">没有子文件夹</p>
           ) : (
             <>
               {treeRoot.slice(0, maxRender).map((entry) => (
@@ -726,10 +761,10 @@ export default function LibraryView() {
                   active
                   expanded
                   contentVersion={contentVersion}
-                  selectedPath={selected?.relativePath ?? null}
+                  selectedPath={currentDir}
                   maxRender={maxListRender}
                   onToggle={() => {}}
-                  onActivate={() => {}}
+                  onActivate={() => inLibrary(selectorLib, (h) => h.navigate(""))}
                   onClose={() => {}}
                   onNewFile={() => {}}
                   onNewFolder={() => {}}
@@ -776,7 +811,7 @@ export default function LibraryView() {
               active={current?.id === lib.id}
               expanded={expandedLibs.has(lib.id)}
               contentVersion={contentVersion}
-              selectedPath={current?.id === lib.id ? (selected?.relativePath ?? null) : null}
+              selectedPath={current?.id === lib.id ? currentDir : null}
               maxRender={maxListRender}
               onToggle={() => toggleLibExpanded(lib.id)}
               onActivate={() => inLibrary(lib, (h) => (current?.id === lib.id ? h.navigate("") : h.noop()))}
