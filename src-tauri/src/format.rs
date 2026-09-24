@@ -26,9 +26,14 @@ pub const FORMATS: &[FormatDef] = &[
             "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "kt", "kts",
             "swift", "c", "h", "cpp", "hpp", "cc", "cs", "rb", "php", "sh", "bash", "zsh",
             "ps1", "bat", "cmd", "sql", "lua", "dart", "scala", "r", "vue", "svelte", "zig",
-            // 编辑器已支持高亮、此前被归为「其他」的扩展名（网页 / 样式表 / 脚本变体）
-            "html", "htm", "css", "scss", "less", "mts", "cts", "pyi", "pyw", "psm1", "psd1", "csx",
+            // 编辑器已支持高亮、此前被归为「其他」的扩展名（样式表 / 脚本变体）
+            "css", "scss", "less", "mts", "cts", "pyi", "pyw", "psm1", "psd1", "csx",
         ],
+    },
+    FormatDef {
+        id: "html",
+        label: "网页",
+        extensions: &["html", "htm", "xhtml"],
     },
     FormatDef {
         id: "json",
@@ -155,7 +160,7 @@ mod tests {
     #[test]
     fn editor_supported_extensions_are_recognized() {
         for (name, want) in [
-            ("index.html", "code"), ("page.htm", "code"), ("site.css", "code"), ("a.scss", "code"),
+            ("index.html", "html"), ("page.htm", "html"), ("a.xhtml", "html"), ("site.css", "code"), ("a.scss", "code"),
             ("b.less", "code"), ("m.mts", "code"), ("stub.pyi", "code"), ("mod.psm1", "code"),
             ("app.csproj", "xml"), ("web.config", "xml"), ("schema.xsd", "xml"), ("Directory.Build.props", "xml"),
         ] {

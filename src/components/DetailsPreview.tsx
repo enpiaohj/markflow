@@ -26,7 +26,7 @@ const TEXT_PREVIEW_MAX_CHARS = 2000;
 /** 选择停留多久后才开始读取（快速点击 / 方向键浏览时不为每个经过的文件读盘） */
 const SELECT_DEBOUNCE_MS = 180;
 /** 预览区固定高度，保证面板不因预览内容抖动 */
-const PREVIEW_H = "h-40";
+const PREVIEW_H = "h-64";
 
 type PdfJs = typeof import("pdfjs-dist");
 let pdfjsPromise: Promise<PdfJs> | null = null;
@@ -94,15 +94,16 @@ function PdfPreview({ libraryId, entry }: { libraryId: string; entry: FileEntry 
         const doc = await task.promise;
         const pg = await doc.getPage(1);
         const base = pg.getViewport({ scale: 1 });
-        const targetW = 288; // 详情面板内容宽度
-        const vp = pg.getViewport({ scale: (targetW / base.width) * (window.devicePixelRatio || 1) });
+        // 按 320 CSS 像素宽渲染（详情面板内容宽度最大约 280），显示时缩放到容器宽度
+        const renderW = 320;
+        const vp = pg.getViewport({ scale: (renderW / base.width) * (window.devicePixelRatio || 1) });
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext("2d");
         if (!canvas || !ctx || cancelled) return;
         canvas.width = Math.floor(vp.width);
         canvas.height = Math.floor(vp.height);
-        canvas.style.width = `${targetW}px`;
-        canvas.style.height = `${Math.round((base.height * targetW) / base.width)}px`;
+        canvas.style.width = "100%";
+        canvas.style.height = "auto";
         await pg.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
         if (!cancelled) setState("done");
       } catch {
@@ -116,9 +117,9 @@ function PdfPreview({ libraryId, entry }: { libraryId: string; entry: FileEntry 
   }, [libraryId, entry.relativePath]);
   if (state === "failed") return null;
   return (
-    <div className={`${PREVIEW_H} relative flex items-start justify-center overflow-hidden rounded-lg border border-gray-200 bg-white`}>
+    <div className={`${state === "loading" ? PREVIEW_H : ""} relative max-h-[26rem] overflow-hidden rounded-lg border border-gray-200 bg-white`}>
       {state === "loading" && <div className="absolute inset-0 animate-pulse bg-gray-100" />}
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} className="block w-full" />
     </div>
   );
 }
@@ -131,7 +132,7 @@ function TextPreview({ libraryId, entry }: { libraryId: string; entry: FileEntry
     api
       .readTextFile(libraryId, entry.relativePath, TEXT_PREVIEW_MAX_BYTES)
       .then((c) => {
-        if (!cancelled) setText(c.content.slice(0, TEXT_PREVIEW_MAX_CHARS).split(/\r?\n/).slice(0, 12).join("\n"));
+        if (!cancelled) setText(c.content.slice(0, TEXT_PREVIEW_MAX_CHARS).split(/\r?\n/).slice(0, 18).join("\n"));
       })
       .catch(() => {
         if (!cancelled) setText(""); // 读取失败（如编码不受支持）就不显示预览
@@ -161,7 +162,7 @@ export function hasDetailsPreview(entry: FileEntry): boolean {
 }
 
 /**
- * 右侧详情面板的文件预览：图片显示图片本体、PDF 渲染首页、文本类显示前 12 行摘录；
+ * 右侧详情面板的文件预览：图片显示图片本体、PDF 渲染首页、文本类显示前 18 行摘录；
  * 其余格式、空文件与超大文件不预览（见 hasDetailsPreview）。选择停留片刻后才读取，读取失败静默不显示。
  * 开关见「设置 → 外观 → 详情面板预览」（prefs: mf-pref-details-preview，默认开启）。
  */

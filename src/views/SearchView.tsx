@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FolderOpen, LocateFixed, Search, TriangleAlert } from "lucide-react";
+import { Info, LocateFixed, Search, TriangleAlert } from "lucide-react";
 import { useDialog } from "../components/DialogContext";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
@@ -158,9 +158,17 @@ export default function SearchView() {
           {searching ? "搜索中…" : "搜索"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-gray-400">
-        检索文件名与正文（Markdown、文本、代码、JSON、YAML、CSV，以及 Word / Excel / PowerPoint 正文；PDF 正文暂不支持）。
-        不足 3 个字符时使用逐文件的子串匹配，大库中速度会慢于长关键词。
+      <p className="mt-2 flex items-center gap-1 text-xs text-gray-400">
+        按文件名与正文搜索
+        <span
+          className="inline-flex cursor-help"
+          title={
+            "可检索正文的格式：Markdown、文本、代码、网页、JSON、YAML、XML、CSV，以及 Word / Excel / PowerPoint（PDF 正文暂不支持，仍可按文件名搜索）。\n" +
+            "不足 3 个字符时逐文件匹配，大库中较慢，建议使用更长的关键词。"
+          }
+        >
+          <Info className="h-3.5 w-3.5" />
+        </span>
       </p>
 
       {error && (
@@ -183,7 +191,7 @@ export default function SearchView() {
         {hits === null ? (
           !error && (
             <div className="flex h-full flex-col items-center justify-center text-gray-400">
-              <FolderOpen className="h-7 w-7" />
+              <Search className="h-7 w-7" />
               <p className="mt-3 text-sm">输入关键词开始搜索</p>
             </div>
           )

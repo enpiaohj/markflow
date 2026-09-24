@@ -93,6 +93,13 @@ const CONTENT: Record<string, ReactNode> = {
       <line x1="17.8" y1="12.8" x2="14.2" y2="22.4" />
     </g>
   ),
+  // 网页：橙色 <> 尖括号（系统图标是默认浏览器 / 用户档案头像，观感不统一，固定用内置图标）
+  html: (
+    <g stroke="#ea580c" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none">
+      <polyline points="13.6,14.2 10,17.6 13.6,21" />
+      <polyline points="18.4,14.2 22,17.6 18.4,21" />
+    </g>
+  ),
   // JSON：琥珀色花括号
   json: (
     <g stroke="#d97706" strokeWidth="1.8" strokeLinecap="round" fill="none">
@@ -184,7 +191,9 @@ export default function FileTypeIcon({
 }) {
   const cls = size === "xs" ? "h-4 w-4" : size === "sm" ? "h-6 w-6" : "h-8 w-8";
   const isDir = format === "directory";
-  const sys = useSysIcon(isDir ? FOLDER_KEY : name !== undefined ? iconKeyForName(name) : null);
+  // 网页格式不取系统图标：其系统图标随默认浏览器变化，常是用户档案头像，与其余图标风格不一致
+  const sysKey = isDir ? FOLDER_KEY : name !== undefined && format !== "html" ? iconKeyForName(name) : null;
+  const sys = useSysIcon(sysKey);
 
   if (sys) {
     return (

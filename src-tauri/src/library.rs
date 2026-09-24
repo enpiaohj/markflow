@@ -32,11 +32,11 @@ pub const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
 ];
 
 /// 参与文本提取与全文索引的格式（Office/PDF 提取引擎在后续迭代接入）。
-pub const TEXT_FORMATS: &[&str] = &["markdown", "text", "code", "json", "yaml", "xml", "config", "csv"];
+pub const TEXT_FORMATS: &[&str] = &["markdown", "text", "code", "html", "json", "yaml", "xml", "config", "csv"];
 
 /// 扫描时提取正文、写入全文索引的格式：文本类 + Office（Word / Excel / PowerPoint 走 OOXML 安全解析）。
 /// 与 TEXT_FORMATS（可在应用内编辑的文本格式）区分。
-pub const INDEX_FORMATS: &[&str] = &["markdown", "text", "code", "json", "yaml", "xml", "config", "csv", "word", "excel", "powerpoint"];
+pub const INDEX_FORMATS: &[&str] = &["markdown", "text", "code", "html", "json", "yaml", "xml", "config", "csv", "word", "excel", "powerpoint"];
 
 fn is_indexable(format: &str) -> bool {
     INDEX_FORMATS.contains(&format)

@@ -11,6 +11,7 @@ const FORMAT_STYLES: Record<string, FormatStyle> = {
   markdown: { badgeClass: "bg-sky-500", badgeText: "M" },
   text: { badgeClass: "bg-gray-400", badgeText: "T" },
   code: { badgeClass: "bg-slate-600", badgeText: "</>" },
+  html: { badgeClass: "bg-orange-500", badgeText: "H" },
   json: { badgeClass: "bg-amber-500", badgeText: "{}" },
   yaml: { badgeClass: "bg-orange-400", badgeText: "Y" },
   xml: { badgeClass: "bg-lime-600", badgeText: "X" },
@@ -59,6 +60,7 @@ export const EDITABLE_FORMATS: ReadonlySet<string> = new Set([
   "markdown",
   "text",
   "code",
+  "html",
   "json",
   "yaml",
   "xml",
@@ -84,4 +86,32 @@ export function officeKind(name: string): "word" | "excel" | "powerpoint" | null
   if (["xlsx", "xls", "xlsm", "ods"].includes(ext)) return "excel";
   if (["pptx", "ppt", "pptm", "odp"].includes(ext)) return "powerpoint";
   return null;
+}
+
+/**
+ * 长路径的中间省略：保留盘符 / 首段与末尾若干段，中间用「…」代替，避免在单词中间换行。
+ * `max` 为显示字符数上限（近似）；完整路径应放在 title 里供悬停查看。
+ */
+export function ellipsizePath(path: string, max = 40): string {
+  if (path.length <= max) return path;
+  const sep = path.includes("\\") ? "\\" : "/";
+  const parts = path.split(sep);
+  if (parts.length <= 2) return path.slice(0, max - 1) + "…";
+  const head = parts[0];
+  let last = parts[parts.length - 1];
+  // 文件名本身过长时也做中间省略（完整名称已显示在标题里）
+  const room = Math.max(12, max - head.length - 2);
+  if (last.length > room) {
+    const keep = Math.floor((room - 1) / 2);
+    last = last.slice(0, keep) + "…" + last.slice(last.length - keep);
+  }
+  const tail = [last];
+  let len = head.length + 2 + last.length + 2; // 首段 + 「…」段 + 末段 + 分隔符
+  for (let i = parts.length - 2; i > 0; i--) {
+    if (len + parts[i].length + 1 > max) break;
+    tail.unshift(parts[i]);
+    len += parts[i].length + 1;
+  }
+  const omitted = tail.length < parts.length - 1;
+  return [head, ...(omitted ? ["…"] : []), ...tail].join(sep);
 }

@@ -150,14 +150,38 @@ export default function DeliveryView() {
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-[11px] text-white">1</span>
               来源文档（{files.length} 个可选{selectedPaths.length > 0 ? `，已选 ${selectedPaths.length} 个` : ""}）
             </p>
-            <input
-              type="text"
-              value={fileFilter}
-              onChange={(e) => setFileFilter(e.target.value)}
-              placeholder="按路径筛选来源文档"
-              className="mt-2.5 w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 outline-none focus:border-primary-500"
-            />
-            <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-gray-100">
+            <div className="mt-2.5 flex items-center gap-2">
+              <input
+                type="text"
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+                placeholder="按路径筛选来源文档"
+                className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 outline-none focus:border-primary-500"
+              />
+              <button
+                type="button"
+                disabled={visibleFiles.length === 0}
+                onClick={() =>
+                  setSelectedPaths((prev) => {
+                    const have = new Set(prev);
+                    return [...prev, ...visibleFiles.map((f) => f.relativePath).filter((p) => !have.has(p))];
+                  })
+                }
+                title={keyword ? "选中当前筛选出的全部文档" : "选中全部文档"}
+                className="shrink-0 whitespace-nowrap rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                {keyword ? "全选筛选结果" : "全选"}
+              </button>
+              <button
+                type="button"
+                disabled={selectedPaths.length === 0}
+                onClick={() => setSelectedPaths([])}
+                className="shrink-0 whitespace-nowrap rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                清除已选
+              </button>
+            </div>
+            <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-gray-100">
               {visibleFiles.length === 0 && (
                 <p className="px-3 py-3 text-xs text-gray-400">没有符合筛选条件的文档</p>
               )}
@@ -269,8 +293,8 @@ export default function DeliveryView() {
             )}
           </section>
 
-          {/* 4 执行 */}
-          <section className="rounded-xl border border-gray-200 bg-white p-4">
+          {/* 4 执行（吸底：内容较长时「开始交付」始终可见，滚到此处后回到正常位置） */}
+          <section className="sticky bottom-0 z-10 rounded-xl border border-gray-200 bg-white p-4 shadow-[0_-6px_16px_rgba(0,0,0,0.06)]">
             <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-[11px] text-white">4</span>
               开始交付

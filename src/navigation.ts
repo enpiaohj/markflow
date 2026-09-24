@@ -5,7 +5,6 @@ import {
   ListTodo,
   Search,
   Settings,
-  Share2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,12 +24,11 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
-/** 活动栏上部分组：主要工作区 */
+/** 活动栏上部分组：主要工作区（关系图尚未提供，不在导航中出现，避免点进空页面） */
 export const mainNavItems: NavItem[] = [
   { id: "home", label: "开始", icon: Home },
   { id: "library", label: "文档库", icon: FolderOpen },
   { id: "search", label: "搜索", icon: Search },
-  { id: "graph", label: "关系图", icon: Share2 },
 ];
 
 /** 活动栏下部分组：任务与系统 */

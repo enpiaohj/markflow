@@ -14,8 +14,9 @@ import {
   Trash2,
   TriangleAlert,
   X,
-  Check,
   Copy,
+  ExternalLink,
+  FolderSearch,
 } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import LibraryManagePanel from "../components/LibraryManagePanel";
@@ -23,7 +24,7 @@ import DetailsPreview, { hasDetailsPreview } from "../components/DetailsPreview"
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
-import { EDITABLE_FORMATS, formatSize, formatTime, openRouteFor } from "../lib/format";
+import { EDITABLE_FORMATS, ellipsizePath, formatSize, formatTime, openRouteFor } from "../lib/format";
 import { getLibraryLayout, getMaxListRender, getOfficeEngine, getShowDetailsPreview } from "../lib/prefs";
 import { useDialog } from "../components/DialogContext";
 import type { FileEntry, LibraryMeta } from "../lib/types";
@@ -331,7 +332,6 @@ export default function LibraryView() {
   const [layout, setLayout] = useState(getLibraryLayout());
   const [maxListRender, setMaxListRender] = useState(getMaxListRender());
   const [showDetailsPreview, setShowDetailsPreview] = useState(getShowDetailsPreview());
-  const [pickerOpen, setPickerOpen] = useState(false);
   /** 刚打开 / 切换到库、尚未有任何用户操作：根目录加载后默认定位到第一项 */
   const autoPickRef = useRef(false);
   const [revealPath, setRevealPath] = useState<string | null>(null);
@@ -385,6 +385,39 @@ export default function LibraryView() {
         console.error("复制路径失败", err);
       });
   }
+  /** 在资源管理器中定位（文件：选中；文件夹：打开） */
+  function showInExplorer(entry: FileEntry, lib: LibraryMeta) {
+    setMenu(null);
+    void api.openWithExternal(lib.id, entry.relativePath, "explorer").catch((err) => appDialog.alert(String(err), "无法打开"));
+  }
+
+  /** 交给系统默认应用打开（Word / Excel / WPS 等） */
+  function openWithSystemApp(entry: FileEntry, lib: LibraryMeta) {
+    setMenu(null);
+    void api.openPathInSystem(lib.id, entry.relativePath).catch((err) => appDialog.alert(String(err), "无法打开"));
+  }
+
+  /** 选中文件夹时详情面板显示的直接子项统计 */
+  const [dirStats, setDirStats] = useState<{ path: string; files: number; dirs: number } | null>(null);
+  useEffect(() => {
+    if (!current || !selected?.isDir) return;
+    let cancelled = false;
+    const path = selected.relativePath;
+    api
+      .listChildren(current.id, path)
+      .then((children) => {
+        if (cancelled) return;
+        const dirs = children.filter((c) => c.isDir).length;
+        setDirStats({ path, files: children.length - dirs, dirs });
+      })
+      .catch(() => {
+        if (!cancelled) setDirStats(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current, selected]);
+
   /** 对话框：新建文件 / 新建文件夹 / 重命名 / 移动；`lib` 明确记录操作所属的文档库 */
   const [dialog, setDialog] = useState<
     | { kind: "new-file"; dir: string; lib: LibraryMeta }
@@ -667,58 +700,20 @@ export default function LibraryView() {
           <LibraryManagePanel />
         ) : layout === "selector" ? (
           <>
-            {/* 文档库选择器：一次只显示一个库的目录树 */}
-            <div className="relative border-b border-gray-100 px-2 py-2">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen((v) => !v)}
-                  title={selectorLib ? selectorLib.rootPath : "选择文档库"}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left hover:bg-gray-50"
-                >
-                  <FolderOpen className="h-4 w-4 shrink-0 text-primary-600" />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-gray-900">
-                    {selectorLib ? selectorLib.name : "选择文档库"}
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-                </button>
-                {selectorLib && (
-                  <>
-                    <button type="button" title={`在「${selectorLib.name}」根目录新建文档`} onClick={() => openNewFile("", selectorLib)}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
-                      <FilePlus2 className="h-4 w-4" />
-                    </button>
-                    <button type="button" title={`在「${selectorLib.name}」根目录新建文件夹`} onClick={() => openNewFolder("", selectorLib)}
-                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
-                      <FolderPlus className="h-4 w-4" />
-                    </button>
-                  </>
-                )}
-              </div>
-              {pickerOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setPickerOpen(false)} />
-                  <div className="absolute left-2 right-2 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
-                    {pickable.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">还没有文档库</p>}
-                    {pickable.map((lib) => (
-                      <button
-                        key={lib.id}
-                        type="button"
-                        onClick={() => {
-                          setPickerOpen(false);
-                          if (lib.id !== current?.id) inLibrary(lib, (h) => h.noop());
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-50"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-medium text-gray-800">{lib.name}</span>
-                          <span className="block truncate text-[11px] text-gray-400">{lib.rootPath}</span>
-                        </span>
-                        {lib.id === current?.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary-600" />}
-                      </button>
-                    ))}
-                  </div>
-                </>
+            {/* 当前库的目录树；切换文档库用标题栏的库切换入口（任何视图 / 模式下都可见） */}
+            <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+              <span className="text-[11px] font-medium tracking-wide text-gray-400">目录</span>
+              {selectorLib && (
+                <div className="flex items-center gap-0.5">
+                  <button type="button" title={`在「${selectorLib.name}」根目录新建文档`} onClick={() => openNewFile("", selectorLib)}
+                    className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
+                    <FilePlus2 className="h-4 w-4" />
+                  </button>
+                  <button type="button" title={`在「${selectorLib.name}」根目录新建文件夹`} onClick={() => openNewFolder("", selectorLib)}
+                    className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary-600">
+                    <FolderPlus className="h-4 w-4" />
+                  </button>
+                </div>
               )}
             </div>
             <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -743,7 +738,7 @@ export default function LibraryView() {
                   onContextMenu={(entry, x, y) => openContext(entry, x, y, selectorLib)}
                 />
               ) : (
-                <p className="px-2 py-4 text-center text-xs text-gray-400">从上方选择器选择一个文档库</p>
+                <p className="px-2 py-4 text-center text-xs text-gray-400">{current ? "当前为单文件模式，没有目录树" : "尚未打开文档库"}</p>
               )}
             </nav>
             <div className="space-y-0.5 border-t border-gray-100 px-2 py-2 text-[13px]">
@@ -799,9 +794,32 @@ export default function LibraryView() {
       </aside>
 
       {!current && (
-        <div className="flex min-w-0 flex-1 flex-col items-center justify-center text-gray-400">
-          <FolderOpen className="h-8 w-8" />
-          <p className="mt-3 text-sm">在左侧选择一个文档库</p>
+        <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-6">
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-gray-400">
+            <FolderOpen className="h-7 w-7" />
+          </span>
+          <p className="mt-3 text-sm font-medium text-gray-800">选择要打开的文档库</p>
+          <div className="mt-4 w-full max-w-md divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {pickable.slice(0, 8).map((lib) => (
+              <button
+                key={lib.id}
+                type="button"
+                onClick={() => inLibrary(lib, (h) => h.noop())}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-50"
+              >
+                <FolderOpen className="h-4 w-4 shrink-0 text-amber-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-gray-800">{lib.name}</span>
+                  <span className="block truncate text-[11px] text-gray-400">{lib.rootPath}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {pickable.length > 8 && (
+            <button type="button" onClick={openManager} className="mt-2 text-xs text-primary-600 hover:underline">
+              还有 {pickable.length - 8} 个文档库，在「管理文档库」中查看
+            </button>
+          )}
         </div>
       )}
       {current && (<>
@@ -840,7 +858,7 @@ export default function LibraryView() {
               type="button"
               onClick={() => openNewFile(currentDir, current)}
               title={`在「${current.name}」的当前目录新建 Markdown 文档`}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50"
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-primary-700"
             >
               <FilePlus2 className="h-3.5 w-3.5" />
               新建文档
@@ -860,7 +878,7 @@ export default function LibraryView() {
               disabled={!current}
               title="正式交付中心：多格式导出与交付历史"
               onClick={openDelivery}
-              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-primary-700 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-[13px] text-gray-600 hover:bg-gray-50 disabled:opacity-40"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
               交付
@@ -976,7 +994,36 @@ export default function LibraryView() {
               </div>
             </div>
 
-            <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">基本信息</p>
+            {/* 快捷操作：与右键菜单一致，不必再去右键找 */}
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => openEntry(selected)}
+                className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-primary-700"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                打开
+              </button>
+              {!selected.isDir && openRouteFor(selected.format) !== "system" && (
+                <button
+                  type="button"
+                  onClick={() => openWithSystemApp(selected, current)}
+                  className="whitespace-nowrap rounded-md border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  系统打开
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => showInExplorer(selected, current)}
+                className="flex items-center gap-1 whitespace-nowrap rounded-md border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                <FolderSearch className="h-3.5 w-3.5" />
+                在文件夹中显示
+              </button>
+            </div>
+
+            <p className="mb-2 mt-5 text-xs font-medium uppercase tracking-wide text-gray-400">基本信息</p>
             <dl className="space-y-2 text-[13px]">
               <div className="flex justify-between gap-3">
                 <dt className="shrink-0 text-gray-500">类型</dt>
@@ -984,27 +1031,58 @@ export default function LibraryView() {
                   {selected.formatLabel}
                 </dd>
               </div>
-              <div className="flex justify-between gap-3">
-                <dt className="shrink-0 text-gray-500">大小</dt>
-                <dd className="text-right text-gray-800">{selected.isDir ? "—" : formatSize(selected.size)}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="shrink-0 text-gray-500">修改时间</dt>
-                <dd className="text-right text-gray-800">{selected.isDir ? "—" : formatTime(selected.mtime)}</dd>
-              </div>
+              {selected.isDir ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="shrink-0 text-gray-500">包含</dt>
+                  <dd className="text-right text-gray-800">
+                    {dirStats && dirStats.path === selected.relativePath
+                      ? `${dirStats.files} 个文件、${dirStats.dirs} 个文件夹`
+                      : "…"}
+                  </dd>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-gray-500">大小</dt>
+                    <dd className="text-right text-gray-800">{formatSize(selected.size)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="shrink-0 text-gray-500">修改时间</dt>
+                    <dd className="text-right text-gray-800">{formatTime(selected.mtime)}</dd>
+                  </div>
+                </>
+              )}
               <div>
                 <dt className="text-gray-500">位置</dt>
-                <dd className="mt-1 break-all rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs leading-relaxed text-gray-600">
-                  {selected.relativePath === ""
-                    ? current.rootPath
-                    : `${current.rootPath}\\${selected.relativePath.split("/").join("\\")}`}
+                <dd className="mt-1 flex items-start gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs leading-relaxed text-gray-600">
+                  {(() => {
+                    const full =
+                      selected.relativePath === ""
+                        ? current.rootPath
+                        : `${current.rootPath.replace(/[\\/]+$/, "")}\\${selected.relativePath.split("/").join("\\")}`;
+                    return (
+                      <>
+                        <span className="min-w-0 flex-1 break-words" title={full}>
+                          {ellipsizePath(full, 44)}
+                        </span>
+                        <button
+                          type="button"
+                          title="复制完整路径"
+                          onClick={() => copyEntryPath(selected, current)}
+                          className="mt-0.5 shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    );
+                  })()}
                 </dd>
               </div>
             </dl>
 
             {showDetailsPreview && hasDetailsPreview(selected) && (
               <>
-                <p className="mb-2 mt-6 text-xs font-medium uppercase tracking-wide text-gray-400">预览</p>
+                <p className="mb-2 mt-5 text-xs font-medium uppercase tracking-wide text-gray-400">预览</p>
                 <DetailsPreview libraryId={current.id} entry={selected} />
               </>
             )}
@@ -1031,10 +1109,19 @@ export default function LibraryView() {
             }}
           />
           <div
-            className="fixed z-50 w-44 rounded-lg border border-gray-200 bg-white py-1 text-[13px] shadow-xl"
-            style={{ left: menu.x, top: menu.y }}
+            className="fixed z-50 w-52 rounded-lg border border-gray-200 bg-white py-1 text-[13px] shadow-xl"
+            style={{ left: Math.min(menu.x, window.innerWidth - 216), top: Math.min(menu.y, window.innerHeight - 340) }}
           >
             <p className="truncate px-3 pb-1 pt-0.5 text-[11px] text-gray-400">{menu.lib.name}</p>
+            <MenuItem icon={<ExternalLink className="h-3.5 w-3.5" />} label="打开"
+              onClick={() => { const e2 = menu.entry; const l = menu.lib; setMenu(null); inLibrary(l, (h) => h.openEntry(e2)); }} />
+            {!menu.entry.isDir && openRouteFor(menu.entry.format) !== "system" && (
+              <MenuItem icon={<ExternalLink className="h-3.5 w-3.5" />} label="用系统应用打开"
+                onClick={() => openWithSystemApp(menu.entry, menu.lib)} />
+            )}
+            <MenuItem icon={<FolderSearch className="h-3.5 w-3.5" />} label="在资源管理器中显示"
+              onClick={() => showInExplorer(menu.entry, menu.lib)} />
+            <MenuDivider />
             {menu.entry.isDir && (
               <>
                 <MenuItem icon={<FilePlus2 className="h-3.5 w-3.5" />} label="新建文档"
