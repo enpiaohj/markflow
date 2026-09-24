@@ -132,7 +132,7 @@
 
 ### 方式三：从源码构建
 
-见《[开发指南](docs/2026-09-22-MarkFlow开发指南-v1.6.md)》。
+见《[开发指南](docs/2026-09-24-MarkFlow开发指南-v1.7.md)》。
 
 ## 快速上手（5 分钟）
 
@@ -142,7 +142,7 @@
 4. **编辑**：双击 Markdown 文件进入可视化编辑，`Ctrl + S` 保存；用其他程序改动文件后 MarkFlow 会自动同步。
 5. **AI（可选）**：设置 → AI 中添加 Provider 与 API Key → 编辑器右上「AI 助手」基于当前文档问答或润色。
 
-更多细节见《[使用指南](docs/2026-09-22-MarkFlow使用指南-v1.6.md)》。
+更多细节见《[使用指南](docs/2026-09-24-MarkFlow使用指南-v1.7.md)》。
 
 ## 项目结构
 
@@ -203,7 +203,7 @@ npm run tauri build    # 完整发布构建（NSIS 安装包）
 cargo test             # Rust 单元 / 集成测试（src-tauri 下）
 ```
 
-测试策略、模块职责、发布流程与常见开发问题详见《[开发指南](docs/2026-09-22-MarkFlow开发指南-v1.6.md)》。
+测试策略、模块职责、发布流程与常见开发问题详见《[开发指南](docs/2026-09-24-MarkFlow开发指南-v1.7.md)》。
 
 ## 故障排查（FAQ）
 
@@ -222,8 +222,8 @@ cargo test             # Rust 单元 / 集成测试（src-tauri 下）
 |---|---|
 | 产品设计与技术实施方案 v2.0（不入库，存放于 ai-coding-workspace） | 产品定位、功能闭环、技术架构、路线图 |
 | UI 概念设计图（不入库，存放于 ai-coding-workspace） | 10 张核心界面概念稿 |
-| [使用指南 v1.6](docs/2026-09-22-MarkFlow使用指南-v1.6.md) | 分功能操作手册与常见问题 |
-| [开发指南 v1.6](docs/2026-09-22-MarkFlow开发指南-v1.6.md) | 环境搭建、架构、测试、发布流程、许可与合规 |
+| [使用指南 v1.7](docs/2026-09-24-MarkFlow使用指南-v1.7.md) | 分功能操作手册与常见问题 |
+| [开发指南 v1.7](docs/2026-09-24-MarkFlow开发指南-v1.7.md) | 环境搭建、架构、测试、发布流程、许可与合规 |
 | [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES.md) | 第三方组件许可声明 |
 | [SECURITY](SECURITY.md) | 安全策略与漏洞报告方式 |
 | [CHANGELOG](CHANGELOG.md) | 版本变更记录 |

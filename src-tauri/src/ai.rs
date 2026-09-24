@@ -192,13 +192,13 @@ pub struct ContextFile {
 }
 
 fn extract_context_text(root: &Path, rel: &str) -> Result<String, String> {
-    let path = root.join(rel);
+    let path = crate::pathguard::join_in_root(root, rel)?;
     let format = crate::format::detect_format(rel.rsplit('/').next().unwrap_or(rel));
     if matches!(format, "word" | "excel" | "powerpoint") {
         return crate::office::extract_text(&path, format);
     }
     if !crate::library::TEXT_FORMATS.contains(&format) {
-        return Err(format!("格式「{}」暂不支持作为 AI 上下文", crate::format::format_label(&format)));
+        return Err(format!("格式「{}」暂不支持作为 AI 上下文", crate::format::format_label(format)));
     }
     let bytes = std::fs::read(&path).map_err(|e| format!("读取 {rel} 失败: {e}"))?;
     Ok(String::from_utf8_lossy(&bytes).to_string())

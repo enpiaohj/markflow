@@ -32,8 +32,7 @@ pub fn is_recent(path: &Path) -> bool {
         return true;
     }
     table()
-        .lock()
-        .unwrap()
+        .lock_safe()
         .get(path)
         .map(|at| at.elapsed() < WINDOW)
         .unwrap_or(false)

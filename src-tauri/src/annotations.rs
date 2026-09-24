@@ -102,7 +102,7 @@ pub fn delete(conn: &Connection, id: i64) -> Result<(), String> {
 
 fn library_file(conn: &Connection, library_id: &str, relative_path: &str) -> Result<PathBuf, String> {
     let root = crate::library::get_library(conn, library_id)?.root_path;
-    Ok(std::path::PathBuf::from(root).join(relative_path))
+    crate::pathguard::join_in_root(&root, relative_path)
 }
 
 use std::path::PathBuf;

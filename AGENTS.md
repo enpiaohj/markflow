@@ -34,7 +34,9 @@ MarkFlow 是多格式本地文档库桌面应用（设计文档不入库，见 a
 | 前端 | React 19 + TypeScript + Vite |
 | 样式 | Tailwind CSS 4（`@theme` 设计令牌，主色 blue-600） |
 | 图标 | lucide-react |
-| 规划中 | Tiptap/ProseMirror、CodeMirror 6、PDF.js、SQLite FTS5、Pandoc sidecar |
+| 编辑与预览 | Tiptap/ProseMirror（Markdown 所见即所得）、CodeMirror 6（源码模式）、PDF.js、docx-preview、pptx-renderer |
+| 存储与检索 | SQLite（rusqlite bundled，WAL；一条写连接 + 只读连接池）、FTS5 trigram 全文检索 |
+| 外部组件 | Pandoc（转换 / 交付，可选，运行时检测）、LibreOffice / Microsoft Office（Office 精确版式预览，可选） |
 
 ## 常用命令
 
@@ -52,15 +54,17 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 - 全部自然语言沟通、注释、文档使用简体中文；代码标识符、命令、API 保持原始技术形式。
 - 前端组件放 `src/components/`，一级导航视图放 `src/views/`，导航模型集中在 `src/navigation.ts`。
 - 设计令牌统一在 `src/index.css` 的 `@theme` 中定义，组件通过 Tailwind 类引用（如 `text-primary-600`），不在组件内写死色值。
-- 窗口控制、文件系统等系统能力必须走 Tauri 能力权限（`src-tauri/capabilities/`），按需最小授权。
+- 窗口控制、文件系统等系统能力必须走 Tauri 能力权限（`src-tauri/capabilities/`），按需最小授权；界面启用严格 CSP（`tauri.conf.json`），新增外部资源来源须同步评估。
+- 「库根 + 前端传来的相对路径」一律经 `src-tauri/src/pathguard.rs` 的 `join_in_root` 拼接（拒绝绝对路径 / `..` / 盘符），禁止直接 `Path::join`。
+- 数据库：写入与事务走 `state.0`（唯一写连接）；纯读取走 `state.read()`（只读连接池，不被扫描 / 保存等写事务阻塞）。Mutex 加锁用 `lock_safe()`，不用 `.lock().unwrap()`。
 - 新增 Tauri 命令放 `src-tauri/src/`，在 `lib.rs` 的 `invoke_handler` 注册。
 - 不隐藏 Error / Warning；构建或测试失败时定位根因，不得删测试绕过。
 
 ## 文档索引
 
 - 产品设计：不入库，统一存放于 ai-coding-workspace 的 MarkFlow 项目目录
-- 使用指南：`docs/2026-09-22-MarkFlow使用指南-v1.6.md`
-- 开发指南（环境 / 模块职责 / 测试 / 发布流程 / 许可与合规）：`docs/2026-09-22-MarkFlow开发指南-v1.6.md`
+- 使用指南：`docs/2026-09-24-MarkFlow使用指南-v1.7.md`
+- 开发指南（环境 / 模块职责 / 测试 / 发布流程 / 许可与合规）：`docs/2026-09-24-MarkFlow开发指南-v1.7.md`
 - 变更记录：`CHANGELOG.md`
 
 ## 版本与发布
@@ -68,4 +72,4 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 - P0 路线：v0.1 文档库基础 → v0.2 原生编辑与搜索 → v0.3 PDF/Office 与转换 → v0.4 AI 与审阅 → v0.5 正式交付；v0.6 起为体验迭代（多文档库、标签页、设置与主题、Office 阅读体验）并转公开。
 - **公开仓库红线**：产品设计文档 / UI 概念图 / 任何密钥与个人信息不得入库（含 `releases/*/source` 快照）；提交邮箱用 GitHub noreply；依赖许可须与 GPL-3.0 兼容。
 - 正式发布前先跑设计文档第 17 节的技术验证 Spike；Spike 未通过时调整能力声明，不得用 UI 掩盖技术限制。
-- 发布产物命名 `MarkFlow-v<版本>-win-x64.<ext>`；本地 `releases/` 目录已被 .gitignore 排除。
+- 发布产物命名 `MarkFlow-v<版本>-win-x64.<ext>`。`releases/vX.Y.Z/` 中只有 `source/` 与 `CHANGELOG.md` 入库；安装包 / 便携版等二进制由 .gitignore 排除，只上传 GitHub Releases。

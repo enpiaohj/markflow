@@ -117,8 +117,7 @@ pub fn check_markdown(content: &str, resolve_link: &dyn Fn(&str) -> bool) -> Vec
     if let Some(level) = last_heading_level {
         let first_heading = content
             .lines()
-            .find(|l| heading_level(l.trim()).is_some())
-            .map(|l| heading_level(l.trim()).unwrap_or(1));
+            .find_map(|l| heading_level(l.trim()));
         if first_heading.is_some() && level >= 1 && first_heading != Some(1) && first_heading == Some(level) {
             issues.push(Issue {
                 severity: Severity::Info,

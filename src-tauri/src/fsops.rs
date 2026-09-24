@@ -3,7 +3,7 @@
 //! 统一校验：名称合法、同名冲突、目录不可移动进自身、占用报错；
 //! 仅做文件系统操作并返回结果，索引由调用方触发全量重扫重建（保证一致性）。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// 名称合法性（Windows 规则）：非空、首尾无空白、无路径分隔符与非法字符、无连续点号、
 /// 不以点号开头/结尾（点号开头的隐藏项不会纳入索引）、非保留设备名（含带扩展名形式）。
@@ -44,8 +44,8 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn join_relative(root: &str, rel: &str) -> PathBuf {
-    Path::new(root).join(rel)
+fn join_relative(root: &str, rel: &str) -> Result<PathBuf, String> {
+    crate::pathguard::join_in_root(root, rel)
 }
 
 fn parent_of(rel: &str) -> String {
@@ -60,7 +60,7 @@ fn base_name_of(rel: &str) -> String {
 pub fn create_directory(root: &str, parent_dir: &str, name: &str) -> Result<(), String> {
     validate_name(name)?;
     let rel = if parent_dir.is_empty() { name.to_string() } else { format!("{parent_dir}/{name}") };
-    let path = join_relative(root, &rel);
+    let path = join_relative(root, &rel)?;
     if path.exists() {
         return Err(format!("同名文件或文件夹已存在：{rel}"));
     }
@@ -73,7 +73,7 @@ pub fn rename_entry(root: &str, relative_path: &str, new_name: &str) -> Result<S
     if relative_path.is_empty() {
         return Err("不能重命名库根目录".into());
     }
-    let old_path = join_relative(root, relative_path);
+    let old_path = join_relative(root, relative_path)?;
     if !old_path.exists() {
         return Err(format!("目标不存在：{relative_path}"));
     }
@@ -82,7 +82,7 @@ pub fn rename_entry(root: &str, relative_path: &str, new_name: &str) -> Result<S
     if new_rel == relative_path {
         return Ok(new_rel);
     }
-    let new_path = join_relative(root, &new_rel);
+    let new_path = join_relative(root, &new_rel)?;
     if new_path.exists() {
         return Err(format!("同名文件或文件夹已存在：{new_rel}"));
     }
@@ -96,7 +96,7 @@ pub fn move_entry(root: &str, relative_path: &str, target_dir: &str) -> Result<S
         return Err("不能移动库根目录".into());
     }
     if !target_dir.is_empty() {
-        let target_path = join_relative(root, target_dir);
+        let target_path = join_relative(root, target_dir)?;
         if !target_path.is_dir() {
             return Err(format!("目标目录不存在：{target_dir}"));
         }
@@ -110,11 +110,11 @@ pub fn move_entry(root: &str, relative_path: &str, target_dir: &str) -> Result<S
     if target_dir == relative_path || target_dir.starts_with(&format!("{relative_path}/")) {
         return Err("不能将文件夹移动到其自身内部".into());
     }
-    let new_path = join_relative(root, &new_rel);
+    let new_path = join_relative(root, &new_rel)?;
     if new_path.exists() {
         return Err(format!("目标位置已存在同名文件或文件夹：{new_rel}"));
     }
-    let old_path = join_relative(root, relative_path);
+    let old_path = join_relative(root, relative_path)?;
     std::fs::rename(&old_path, &new_path).map_err(|e| format!("移动失败（文件可能被其他程序占用）: {e}"))?;
     Ok(new_rel)
 }
@@ -124,7 +124,7 @@ pub fn delete_entry(root: &str, relative_path: &str) -> Result<(), String> {
     if relative_path.is_empty() {
         return Err("不能删除库根目录".into());
     }
-    let path = join_relative(root, relative_path);
+    let path = join_relative(root, relative_path)?;
     if !path.exists() {
         return Err(format!("目标不存在：{relative_path}"));
     }
@@ -134,6 +134,7 @@ pub fn delete_entry(root: &str, relative_path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn setup() -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
@@ -160,6 +161,26 @@ mod tests {
         assert!(validate_name("a:b").is_err());
         assert!(validate_name("尾部点.").is_err());
         assert!(validate_name(" 前导空格.md").is_err());
+    }
+
+    #[test]
+    fn rejects_paths_escaping_the_library_root() {
+        let (guard, root) = setup();
+        // 库根之外放一个「受害」文件，越界操作不得触及它
+        let victim = guard.path().parent().unwrap().join("markflow-victim-check.txt");
+        std::fs::write(&victim, "keep").unwrap();
+        let abs = victim.to_string_lossy().to_string();
+        let escape = "../markflow-victim-check.txt";
+
+        assert!(delete_entry(&root, &abs).is_err());
+        assert!(delete_entry(&root, escape).is_err());
+        assert!(rename_entry(&root, &abs, "x.md").is_err());
+        assert!(rename_entry(&root, escape, "x.md").is_err());
+        assert!(move_entry(&root, "根文档.md", "../").is_err());
+        assert!(move_entry(&root, escape, "a").is_err());
+        assert!(create_directory(&root, "..", "越界").is_err());
+        assert!(victim.is_file(), "库外文件必须保持原样");
+        std::fs::remove_file(&victim).unwrap();
     }
 
     #[test]

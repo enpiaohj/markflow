@@ -286,14 +286,14 @@ fn color_of(n: Node<'_, '_>, theme: &[String]) -> Option<String> {
         rgb.get(rgb.len().saturating_sub(6)..)?.to_string()
     } else if let Some(i) = n.attribute("theme").and_then(|v| v.parse::<usize>().ok()) {
         theme.get(i)?.clone()
-    } else if let Some(i) = n.attribute("indexed").and_then(|v| v.parse::<usize>().ok()) {
+    } else {
+        // 无 rgb / theme 时只剩 indexed；auto（无任何属性）返回 None
+        let i = n.attribute("indexed").and_then(|v| v.parse::<usize>().ok())?;
         match i {
             64 => "000000".to_string(),
             65 => "FFFFFF".to_string(),
             _ => INDEXED.get(i)?.to_string(),
         }
-    } else {
-        return None; // auto
     };
     Some(if t == 0.0 { format!("#{}", base.to_uppercase()) } else { tint(&base, t) })
 }
@@ -816,7 +816,7 @@ fn format_numeric(v: f64, section: &str) -> String {
         let digits: Vec<char> = int_part.chars().collect();
         let mut out = String::new();
         for (i, d) in digits.iter().enumerate() {
-            if i > 0 && (digits.len() - i) % 3 == 0 {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
                 out.push(',');
             }
             out.push(*d);

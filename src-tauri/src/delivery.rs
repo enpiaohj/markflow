@@ -83,7 +83,18 @@ pub fn precheck(root: &Path, sources: &[String]) -> Result<PrecheckReport, Strin
     let mut issues = Vec::new();
 
     for rel in sources {
-        let path = root.join(rel);
+        let path = match crate::pathguard::join_in_root(root, rel) {
+            Ok(p) => p,
+            Err(e) => {
+                issues.push(PrecheckIssue {
+                    relative_path: rel.clone(),
+                    severity: "error".into(),
+                    code: "invalid_path".into(),
+                    message: e,
+                });
+                continue;
+            }
+        };
         if !path.is_file() {
             issues.push(PrecheckIssue {
                 relative_path: rel.clone(),
@@ -220,7 +231,7 @@ fn generate_all(
 
     // 1. Markdown 原文复制（冲突时加前缀目录）
     for src in &report.files {
-        let src_path = root.join(&src.relative_path);
+        let src_path = crate::pathguard::join_in_root(root, &src.relative_path)?;
         let name = src.relative_path.rsplit('/').next().unwrap_or(&src.relative_path).to_string();
         let mut dest = tmp_dir.join(&name);
         let mut n = 1;
@@ -315,7 +326,7 @@ fn build_pandoc_command(
             .arg(header_css_file(root)?);
     }
     for src in &report.files {
-        cmd.arg(root.join(&src.relative_path));
+        cmd.arg(crate::pathguard::join_in_root(root, &src.relative_path)?);
     }
     cmd.arg("-o").arg(out);
     let result = run_with_timeout(&mut cmd, Duration::from_secs(120))

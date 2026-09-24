@@ -6,7 +6,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
@@ -105,9 +106,75 @@ pub struct CreateLibraryRequest {
 // 共享状态
 // ---------------------------------------------------------------------------
 
-/// 全局应用状态：SQLite 连接（Mutex 保护，可克隆进扫描线程）。
+/// 只读连接池大小：够覆盖「列表 / 搜索 / 预览 / AI 上下文」并发读取，又不占过多文件句柄。
+const READ_POOL_SIZE: usize = 4;
+
+/// 只读连接池：WAL 模式下读连接不被写事务阻塞（读到的是上一次提交的快照）。
+pub struct ReadPool {
+    conns: Vec<Mutex<Connection>>,
+    next: AtomicUsize,
+}
+
+/// 全局应用状态（可克隆进扫描线程）：
+/// - `.0` 写连接（唯一）：所有写入、事务、扫描落库都走它；长事务只会让「其他写入」排队；
+/// - `.1` 只读连接池：纯读取命令走 [`AppState::read`]，不再被扫描 / 保存等写事务挡住。
+///
+/// 读到的数据是「最近一次已提交」的快照；写命令返回前已提交，随后发起的读一定能看到。
 #[derive(Clone)]
-pub struct AppState(pub Arc<Mutex<Connection>>);
+pub struct AppState(pub Arc<Mutex<Connection>>, pub Arc<ReadPool>);
+
+impl AppState {
+    /// 无独立读连接的状态（内存库测试用）：`read()` 退化为共用写连接。
+    #[cfg(test)]
+    pub fn single(conn: Connection) -> Self {
+        AppState(
+            Arc::new(Mutex::new(conn)),
+            Arc::new(ReadPool { conns: Vec::new(), next: AtomicUsize::new(0) }),
+        )
+    }
+
+    /// 取一条只读连接：优先取空闲的，全忙时在轮转到的那条上等待。
+    pub fn read(&self) -> MutexGuard<'_, Connection> {
+        let pool = &self.1;
+        let n = pool.conns.len();
+        if n == 0 {
+            return self.0.lock_safe();
+        }
+        let start = pool.next.fetch_add(1, Ordering::Relaxed) % n;
+        for k in 0..n {
+            match pool.conns[(start + k) % n].try_lock() {
+                Ok(guard) => return guard,
+                Err(TryLockError::Poisoned(p)) => return p.into_inner(),
+                Err(TryLockError::WouldBlock) => {}
+            }
+        }
+        pool.conns[start].lock_safe()
+    }
+}
+
+/// 连接通用设置：等待锁的上限，避免偶发的 SQLITE_BUSY（如 WAL 检查点）直接报错。
+fn tune_connection(conn: &Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+}
+
+/// 打开索引库：一条写连接（负责建表 / 迁移）+ 只读连接池（`query_only`，从根本上杜绝误写）。
+pub fn open_state(db_path: &Path) -> Result<AppState, String> {
+    let writer = Connection::open(db_path).map_err(|e| format!("无法打开索引数据库: {e}"))?;
+    tune_connection(&writer).map_err(|e| format!("数据库初始化失败: {e}"))?;
+    run_migrations(&writer).map_err(|e| format!("数据库初始化失败: {e}"))?;
+    let mut readers = Vec::with_capacity(READ_POOL_SIZE);
+    for _ in 0..READ_POOL_SIZE {
+        let conn = Connection::open(db_path).map_err(|e| format!("无法打开索引数据库（只读连接）: {e}"))?;
+        tune_connection(&conn).map_err(|e| format!("数据库初始化失败: {e}"))?;
+        conn.pragma_update(None, "query_only", true)
+            .map_err(|e| format!("数据库初始化失败: {e}"))?;
+        readers.push(Mutex::new(conn));
+    }
+    Ok(AppState(
+        Arc::new(Mutex::new(writer)),
+        Arc::new(ReadPool { conns: readers, next: AtomicUsize::new(0) }),
+    ))
+}
 
 // ---------------------------------------------------------------------------
 // 数据库初始化与迁移
@@ -227,17 +294,14 @@ fn migrate_search_fts_to_rowid(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// 打开（或创建）应用数据目录下的索引库。
-pub fn init_db(app: &AppHandle) -> Result<Connection, String> {
+/// 打开（或创建）应用数据目录下的索引库（写连接 + 只读连接池）。
+pub fn init_db(app: &AppHandle) -> Result<AppState, String> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("无法定位应用数据目录: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建应用数据目录: {e}"))?;
-    let conn = Connection::open(dir.join("markflow.db"))
-        .map_err(|e| format!("无法打开索引数据库: {e}"))?;
-    run_migrations(&conn).map_err(|e| format!("数据库初始化失败: {e}"))?;
-    Ok(conn)
+    open_state(&dir.join("markflow.db"))
 }
 
 fn now_ms() -> i64 {
@@ -1699,6 +1763,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(extracted, 2);
+    }
+
+    #[test]
+    fn read_pool_is_not_blocked_by_a_long_write_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = open_state(&dir.path().join("markflow.db")).unwrap();
+        state
+            .0
+            .lock_safe()
+            .execute(
+                "INSERT INTO libraries (id, root_path, name, created_at, last_opened_at) VALUES ('L1', 'D:/x', 'x', 1, 1)",
+                [],
+            )
+            .unwrap();
+
+        // 写连接开一个长事务并保持不提交（模拟大库扫描落库）
+        let writer = state.0.lock_safe();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        writer
+            .execute(
+                "INSERT INTO libraries (id, root_path, name, created_at, last_opened_at) VALUES ('L2', 'D:/y', 'y', 1, 1)",
+                [],
+            )
+            .unwrap();
+
+        // 另一线程读取：必须立即返回（不等写事务），且只看到已提交的数据
+        let reader_state = state.clone();
+        let t0 = Instant::now();
+        let count = std::thread::spawn(move || {
+            let conn = reader_state.read();
+            conn.query_row("SELECT COUNT(*) FROM libraries", [], |r| r.get::<_, i64>(0)).unwrap()
+        })
+        .join()
+        .unwrap();
+        assert!(t0.elapsed().as_millis() < 1000, "读取被写事务阻塞了");
+        assert_eq!(count, 1, "未提交的写入不应被读到");
+
+        writer.execute_batch("COMMIT").unwrap();
+        drop(writer);
+        let after: i64 = state.read().query_row("SELECT COUNT(*) FROM libraries", [], |r| r.get(0)).unwrap();
+        assert_eq!(after, 2, "提交之后的读必须能看到新数据");
+    }
+
+    #[test]
+    fn read_pool_connections_reject_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = open_state(&dir.path().join("markflow.db")).unwrap();
+        let err = state
+            .read()
+            .execute(
+                "INSERT INTO libraries (id, root_path, name, created_at, last_opened_at) VALUES ('L9', 'D:/z', 'z', 1, 1)",
+                [],
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("readonly"), "只读连接应拒绝写入，实际：{err}");
     }
 }
 

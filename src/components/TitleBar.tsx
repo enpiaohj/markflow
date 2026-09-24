@@ -179,10 +179,14 @@ export default function TitleBar() {
           type="button"
           onClick={requestSearchView}
           title="搜索文件名与正文（Ctrl + K）"
-          className={`flex h-8 max-w-full items-center ${tabs.length > 0 ? "w-[200px]" : "w-[420px]"} gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400 hover:border-gray-300 hover:bg-white`}
+          className={`flex h-8 max-w-full items-center rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-400 hover:border-gray-300 hover:bg-white ${
+            tabs.length > 0
+              ? "w-8 shrink-0 justify-center 2xl:w-[200px] 2xl:justify-start 2xl:gap-2 2xl:px-3" // 有标签时优先把宽度让给标签栏：窄屏收成图标
+              : "w-[420px] gap-2 px-3"
+          }`}
         >
           <Search className="h-4 w-4 shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-left">搜索文档、内容、标签…</span>
+          <span className={`min-w-0 flex-1 truncate text-left ${tabs.length > 0 ? "hidden 2xl:inline" : ""}`}>搜索文档、内容、标签…</span>
           <kbd className={`${tabs.length > 0 ? "hidden" : "hidden xl:inline"} shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-sans text-[11px] text-gray-400`}>
             Ctrl + K
           </kbd>

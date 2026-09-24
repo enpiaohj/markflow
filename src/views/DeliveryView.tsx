@@ -30,11 +30,15 @@ const SEVERITY_META: Record<string, { label: string; cls: string }> = {
   warning: { label: "警告", cls: "bg-amber-50 text-amber-600" },
 };
 
+/** 来源文档列表的读取上限（大库也能完整选择；列表带筛选框，不会因数量多而难用） */
+const MAX_SOURCE_FILES = 20000;
+
 /** 正式交付中心（设计文档 §8.12，概念图「正式交付中心与任务状态」） */
 export default function DeliveryView() {
   const { current, closeDelivery } = useLibrary();
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [fileFilter, setFileFilter] = useState("");
   const [formats, setFormats] = useState<string[]>(["md", "zip"]);
   const [targetDir, setTargetDir] = useState("");
   const [componentNames, setComponentNames] = useState<string[]>([]);
@@ -56,7 +60,7 @@ export default function DeliveryView() {
 
   useEffect(() => {
     if (!current) return;
-    void api.listLibraryFiles(current.id, 500).then(setFiles);
+    void api.listLibraryFiles(current.id, MAX_SOURCE_FILES).then(setFiles);
     void api.listComponents().then((list) => setComponentNames(list.filter((c) => c.found).map((c) => c.name)));
     void loadHistory();
   }, [current, loadHistory]);
@@ -116,6 +120,9 @@ export default function DeliveryView() {
     );
   }
 
+  const keyword = fileFilter.trim().toLowerCase();
+  const visibleFiles = keyword ? files.filter((f) => f.relativePath.toLowerCase().includes(keyword)) : files;
+  const selectedSet = new Set(selectedPaths);
   const missingDeps = (need: string) => need !== "" && !componentNames.includes(need);
 
   return (
@@ -141,11 +148,21 @@ export default function DeliveryView() {
           <section className="rounded-xl border border-gray-200 bg-white p-4">
             <p className="flex items-center gap-2 text-sm font-medium text-gray-900">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary-600 text-[11px] text-white">1</span>
-              来源文档（{files.length} 个可选）
+              来源文档（{files.length} 个可选{selectedPaths.length > 0 ? `，已选 ${selectedPaths.length} 个` : ""}）
             </p>
-            <div className="mt-2.5 max-h-52 overflow-y-auto rounded-lg border border-gray-100">
-              {files.map((f) => {
-                const checked = selectedPaths.includes(f.relativePath);
+            <input
+              type="text"
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              placeholder="按路径筛选来源文档"
+              className="mt-2.5 w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-700 outline-none focus:border-primary-500"
+            />
+            <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-gray-100">
+              {visibleFiles.length === 0 && (
+                <p className="px-3 py-3 text-xs text-gray-400">没有符合筛选条件的文档</p>
+              )}
+              {visibleFiles.map((f) => {
+                const checked = selectedSet.has(f.relativePath);
                 return (
                   <label key={f.relativePath} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
                     <input

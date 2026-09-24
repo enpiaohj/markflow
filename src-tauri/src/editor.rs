@@ -123,6 +123,8 @@ pub fn save_text_file(
 }
 
 /// 保存；`encoding` / `eol` 仅在用户显式选择「转换编码 / 换行符」时传入，默认按磁盘原样写回。
+// 参数与前端 IPC 一一对应，拆成结构体只会增加一层搬运，故豁免参数个数检查。
+#[allow(clippy::too_many_arguments)]
 pub fn save_text_file_as(
     conn: &Connection,
     library_id: &str,
@@ -196,7 +198,7 @@ pub fn restore_file_version(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| "文件不存在于文档库索引")?;
-    Ok(apply_file_meta(conn, &path, file_id, relative_path)?)
+    apply_file_meta(conn, &path, file_id, relative_path)
 }
 
 /// 列出某文件的历史快照（新→旧）。
@@ -252,7 +254,7 @@ pub fn create_text_file(
     }
     let format = crate::format::detect_format(file_name);
     if !TEXT_FORMATS.contains(&format) {
-        return Err(format!("「{}」不支持直接创建，仅支持文本类格式", crate::format::format_label(&format)));
+        return Err(format!("「{}」不支持直接创建，仅支持文本类格式", crate::format::format_label(format)));
     }
     let root = get_library(conn, library_id)?.root_path;
     let relative_path = if parent_dir.is_empty() {
@@ -260,7 +262,7 @@ pub fn create_text_file(
     } else {
         format!("{parent_dir}/{file_name}")
     };
-    let path = Path::new(&root).join(&relative_path);
+    let path = crate::pathguard::join_in_root(&root, &relative_path)?;
     if path.exists() {
         return Err(format!("文件已存在: {relative_path}"));
     }
@@ -292,7 +294,7 @@ pub fn create_text_file(
 
 fn content_file_path(conn: &Connection, library_id: &str, relative_path: &str) -> Result<PathBuf, String> {
     let root = get_library(conn, library_id)?.root_path;
-    Ok(Path::new(&root).join(relative_path))
+    crate::pathguard::join_in_root(&root, relative_path)
 }
 
 fn snapshot_current(conn: &Connection, library_id: &str, relative_path: &str, path: &Path) -> Result<(), String> {
@@ -433,6 +435,8 @@ mod tests {
         assert!(save_text_file(&conn, &lib_id, rel, "改动", read.base_mtime, false).is_err());
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "锁定");
         let mut perm = std::fs::metadata(&p).unwrap().permissions();
+        // 测试清理：Windows 上 readonly 只是文件属性，不涉及 Unix 的全员可写问题
+        #[allow(clippy::permissions_set_readonly_false)]
         perm.set_readonly(false);
         std::fs::set_permissions(&p, perm).unwrap();
     }

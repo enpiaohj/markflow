@@ -189,7 +189,7 @@ pub fn ensure_indexed(conn: &Connection, meta: &LibraryMeta, rel: &str) -> Resul
     if exists {
         return Ok(());
     }
-    let path: PathBuf = Path::new(&meta.root_path).join(rel);
+    let path: PathBuf = crate::pathguard::join_in_root(&meta.root_path, rel)?;
     let md = std::fs::metadata(&path).map_err(|e| format!("读取文件状态失败: {e}"))?;
     let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
     let parent = rel.rsplit_once('/').map(|(p, _)| p.to_string()).unwrap_or_default();
@@ -327,7 +327,7 @@ mod tests {
     /// 文件明明还在磁盘上却报「文件不存在: Query returned no rows」。
     #[test]
     fn adhoc_new_file_survives_subsequent_rescan_only_when_registered() {
-        let state = library::AppState(std::sync::Arc::new(std::sync::Mutex::new(db())));
+        let state = library::AppState::single(db());
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("方案.docx"), "docx 占位").unwrap();
         let t = {

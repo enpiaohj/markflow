@@ -32,13 +32,7 @@ impl Tool {
 
 /// 库根 + 相对路径 → 磁盘绝对路径（Windows 反斜杠）；要求目标存在且不越出库根。
 pub fn resolve_target(root: &str, rel: &str) -> Result<PathBuf, String> {
-    if rel.starts_with('/') || rel.contains('\\') || rel.contains(':') || rel.split('/').any(|s| s == "..") {
-        return Err("路径无效".into());
-    }
-    let mut p = PathBuf::from(root);
-    for part in rel.split('/').filter(|s| !s.is_empty()) {
-        p.push(part);
-    }
+    let p = crate::pathguard::join_in_root(root, rel)?;
     if !p.exists() {
         return Err(format!("路径不存在：{}", p.display()));
     }
