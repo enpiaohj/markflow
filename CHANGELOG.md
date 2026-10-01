@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-02
+
+### Fixed
+
+- **MD 文档浏览与编辑时滚动条不显示**：WebView2（Chromium 121+）在 Windows 11 上默认使用自动隐藏的 Fluent
+  悬浮滚动条——只在滚动瞬间出现、停止即淡出，导致阅读和编辑长文档时看起来没有滚动条。现新增全局自定义
+  滚动条样式（`::-webkit-scrollbar`）接管渲染，恢复为桌面应用式常显滚动条：圆角胶囊滑块，浅色 / 深色主题
+  各自适配，横竖双向与交叉角透明处理。所有滚动区域（编辑画布、源码模式、AI 面板、对话框、Excel 表格、
+  PDF 查看器等）统一生效；标签栏保持「隐藏滚动条 + 左右箭头按钮」的原设计不受影响。
+
 ## [0.12.0] - 2026-09-24
 
 ### Security
