@@ -21,6 +21,7 @@ import { useLibrary } from "../components/LibraryContext";
 import { useUpdate } from "../components/UpdateContext";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
+import { formatTime } from "../lib/format";
 import {
   getAutosave,
   getOfficeEngine,
@@ -233,7 +234,7 @@ export default function SettingsView() {
   const AUTOSTART_DESC = "登录 Windows 后自动启动 MarkFlow（在后台启动：开启「关闭时最小化到通知区域」则驻留通知区域，否则最小化到任务栏）。";
   const TRAY_DESC = "点击关闭按钮只隐藏窗口，应用继续在后台运行；点击通知区域图标恢复，右键菜单选择「退出」才会真正退出。";
   const THEME_DESC = "浅色为默认；深色适合弱光环境；跟随系统会随 Windows 的应用模式自动切换。文档页面（Word / Excel / PPT / PDF）始终保持白纸底色。";
-  const UPDATE_DESC = "启动时检查 GitHub 上是否有新版本（每天最多一次），有新版本时在标题栏提示，由你决定是否更新。这是 MarkFlow 除 AI 外唯一的对外请求，只读取公开的版本信息，不上传任何数据。关闭后仍可在「帮助 → 检查更新」手动检查。";
+  const UPDATE_DESC = "每次启动时检查 GitHub 上是否有新版本，之后运行期间每 6 小时复检一次；有新版本时在标题栏提示，由你决定是否更新。这是 MarkFlow 除 AI 外唯一的对外请求，只读取公开的版本信息，不上传任何数据。关闭后仍可在「帮助 → 检查更新」手动检查。";
   const AUTOSAVE_DESC = "编辑器停止输入 3 秒后自动保存（保存前仍会创建历史快照；异常退出的草稿始终会保留）。";
   const ENGINE_DESC =
     "内置渲染（默认）：即时显示、有目录导航，不启动 Office，保真度略低。自动：装有 Microsoft Office / LibreOffice 时优先用它们导出的精确版式（首次需几秒）。Excel 始终使用原生表格；预览工具栏的「内置渲染 | Office 版式」可随时对当前文档切换。";
@@ -670,7 +671,9 @@ export default function SettingsView() {
                   ? "正在检查…"
                   : update.info
                     ? `发现新版本 v${update.info.version}`
-                    : "当前为已发布的版本"}
+                    : update.lastCheckedAt
+                      ? `已是最新版本 · 上次检查 ${formatTime(update.lastCheckedAt)}`
+                      : "尚未检查"}
               </span>
               {update.info ? (
                 <button type="button" onClick={update.openDialog} className="ml-2 text-primary-600 hover:underline">

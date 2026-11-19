@@ -10,7 +10,16 @@ import {
   setLastUpdateCheck,
   setSkippedUpdateVersion,
 } from "../lib/prefs";
-import { isSkippedVersion, shouldAutoCheck } from "../lib/updatePolicy";
+import {
+  CHECK_RETRY_DELAYS_MS,
+  CHECK_TIMEOUT_MS,
+  RECHECK_POLL_MS,
+  STARTUP_CHECK_DELAY_MS,
+  isRecheckDue,
+  isSkippedVersion,
+  withRetry,
+} from "../lib/updatePolicy";
+import { parseUpdateNotes } from "../lib/updateNotes";
 
 export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "installing";
 
@@ -24,8 +33,12 @@ interface UpdateApi {
   status: UpdateStatus;
   /** 有可用的新版本（含正在下载） */
   info: UpdateInfo | null;
+  /** 是否在标题栏提示新版本：有新版本，且用户没有对该版本点过「跳过此版本」 */
+  notify: boolean;
   /** 手动检查：无更新 / 失败都会给出明确提示 */
   checkNow: () => Promise<void>;
+  /** 上次成功完成检查的时间（毫秒时间戳），从未成功为 null */
+  lastCheckedAt: number | null;
   openDialog: () => void;
 }
 
@@ -37,9 +50,6 @@ export function useUpdate(): UpdateApi {
   return ctx;
 }
 
-/** 启动后延迟这么久再做自动检查，避免与首屏加载争用。 */
-const AUTO_CHECK_DELAY_MS = 8000;
-
 export function UpdateProvider({ children }: { children: ReactNode }) {
   const dialog = useDialog();
   const { editorDirty } = useLibrary();
@@ -47,44 +57,68 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(getLastUpdateCheck());
+  const [skipped, setSkipped] = useState<string | null>(getSkippedUpdateVersion());
   const updateRef = useRef<Update | null>(null);
   const busyRef = useRef(false);
+  /** 本次检查是否需要给出结果提示（手动触发，或自动检查进行中用户又手动点了检查） */
+  const wantFeedbackRef = useRef(false);
   const dirtyRef = useRef(false);
   dirtyRef.current = editorDirty;
 
   const runCheck = useCallback(
     async (manual: boolean) => {
-      if (busyRef.current) return;
+      if (busyRef.current) {
+        // 已有检查在进行（自动检查或安装中）：手动点击不能被静默忽略，等它结束后给出结果
+        if (manual) wantFeedbackRef.current = true;
+        return;
+      }
       busyRef.current = true;
+      wantFeedbackRef.current = manual;
       setStatus("checking");
       try {
-        const update = await check();
-        setLastUpdateCheck(Date.now());
+        // 网络偶发抖动时自动重试，并带超时，避免一直卡在「正在检查」
+        const update = await withRetry(() => check({ timeout: CHECK_TIMEOUT_MS, headers: { "Cache-Control": "no-cache" } }), CHECK_RETRY_DELAYS_MS);
+        const now = Date.now();
+        setLastUpdateCheck(now);
+        setLastCheckedAt(now);
         if (!update) {
+          updateRef.current = null;
+          setInfo(null);
           setStatus("idle");
-          if (manual) await dialog.alert("当前已是最新版本。", "检查更新");
+          if (wantFeedbackRef.current) await dialog.alert("当前已是最新版本。", "检查更新");
           return;
         }
         updateRef.current = update;
         setInfo({ version: update.version, notes: update.body ?? "", date: update.date ?? null });
         setStatus("available");
-        if (manual || !isSkippedVersion(getSkippedUpdateVersion(), update.version)) setDialogOpen(true);
+        // 只有手动检查才弹出更新对话框；自动检查（启动 / 运行中复检）只亮标题栏标记，不打断用户
+        if (wantFeedbackRef.current) setDialogOpen(true);
       } catch (err) {
         console.error("检查更新失败", err);
         setStatus("idle");
-        if (manual) await dialog.alert("无法检查更新，请检查网络连接后重试。", "检查更新");
+        if (wantFeedbackRef.current) await dialog.alert("无法检查更新，请检查网络连接后重试。", "检查更新");
       } finally {
         busyRef.current = false;
+        wantFeedbackRef.current = false;
       }
     },
     [dialog],
   );
 
+  // 启动后检查一次；之后每隔一段时间复检（应用常驻通知区域、很久不重启时也能发现新版本）
   useEffect(() => {
-    if (!shouldAutoCheck(getAutoUpdateCheck(), getLastUpdateCheck(), Date.now())) return;
-    const t = window.setTimeout(() => void runCheck(false), AUTO_CHECK_DELAY_MS);
-    return () => window.clearTimeout(t);
-    // 仅启动时检查一次
+    const startup = window.setTimeout(() => {
+      if (getAutoUpdateCheck()) void runCheck(false);
+    }, STARTUP_CHECK_DELAY_MS);
+    const poll = window.setInterval(() => {
+      if (isRecheckDue(getAutoUpdateCheck(), getLastUpdateCheck(), Date.now())) void runCheck(false);
+    }, RECHECK_POLL_MS);
+    return () => {
+      window.clearTimeout(startup);
+      window.clearInterval(poll);
+    };
+    // 仅在挂载时建立定时器
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -127,16 +161,27 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   }
 
   function skip() {
-    if (info) setSkippedUpdateVersion(info.version);
+    if (info) {
+      setSkippedUpdateVersion(info.version);
+      setSkipped(info.version);
+    }
     setDialogOpen(false);
   }
 
   const api = useMemo<UpdateApi>(
-    () => ({ status, info, checkNow: () => runCheck(true), openDialog: () => info && setDialogOpen(true) }),
-    [status, info, runCheck],
+    () => ({
+      status,
+      info,
+      notify: info !== null && !isSkippedVersion(skipped, info.version),
+      lastCheckedAt,
+      checkNow: () => runCheck(true),
+      openDialog: () => info && setDialogOpen(true),
+    }),
+    [status, info, skipped, lastCheckedAt, runCheck],
   );
 
   const working = status === "downloading" || status === "installing";
+  const noteLines = useMemo(() => (info ? parseUpdateNotes(info.notes) : []), [info]);
 
   return (
     <UpdateContext.Provider value={api}>
@@ -151,9 +196,22 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
             <p className="mt-1 text-xs text-gray-400">
               {info.date ? `发布于 ${info.date.slice(0, 10)} · ` : ""}更新包经签名校验，下载后自动安装并重新启动，文档库与设置不受影响。
             </p>
-            {info.notes && (
-              <div className="mt-3 max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[13px] leading-relaxed text-gray-700">
-                {info.notes}
+            {noteLines.length > 0 && (
+              <div className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[13px] leading-relaxed text-gray-700">
+                {noteLines.map((line, i) =>
+                  line.kind === "heading" ? (
+                    <p key={i} className="mt-2 text-xs font-semibold text-gray-500 first:mt-0">
+                      {line.text}
+                    </p>
+                  ) : line.kind === "bullet" ? (
+                    <p key={i} className="flex gap-1.5">
+                      <span className="text-gray-400">•</span>
+                      <span className="min-w-0 flex-1">{line.text}</span>
+                    </p>
+                  ) : (
+                    <p key={i}>{line.text}</p>
+                  ),
+                )}
               </div>
             )}
             {working && (
@@ -169,7 +227,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
             )}
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" disabled={working} onClick={skip} className="rounded-lg px-3 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 disabled:opacity-40">
-                跳过此版本
+                不再提示此版本
               </button>
               <button type="button" disabled={working} onClick={() => setDialogOpen(false)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-[13px] text-gray-700 hover:bg-gray-50 disabled:opacity-40">
                 稍后提醒

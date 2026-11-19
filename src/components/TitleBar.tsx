@@ -90,7 +90,7 @@ export default function TitleBar() {
             v{version}
           </span>
         )}
-        {update.info && (
+        {update.info && update.notify && (
           <button
             type="button"
             onClick={update.openDialog}
