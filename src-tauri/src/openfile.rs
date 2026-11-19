@@ -112,7 +112,97 @@ pub fn resolve(conn: &Connection, path: &str) -> Result<OpenTarget, String> {
     let parent_str = parent.to_string_lossy().to_string();
     let meta = find_or_create_adhoc(conn, &parent_str, &file_name)?;
     ensure_indexed(conn, &meta, &file_name)?;
+    if format == "markdown" {
+        // 单文件模式只索引明确打开过的文件：Markdown 正文里引用的本地图片（如随文档一起复制过来的
+        // assets/ 截图）从未被扫描，打开时需要一并补登记，否则 read_file_bytes 会报「文件不存在于文档库索引」。
+        register_referenced_images(conn, &meta, &file_name);
+    }
     Ok(OpenTarget { library_id: meta.id, relative_path: file_name, format, adhoc: true })
+}
+
+/// 为单文件模式下 Markdown 正文引用的本地相对路径图片补登记索引（见上文调用处说明）。
+fn register_referenced_images(conn: &Connection, meta: &LibraryMeta, md_rel: &str) {
+    let Ok(md_path) = crate::pathguard::join_in_root(&meta.root_path, md_rel) else { return };
+    let Ok(content) = std::fs::read_to_string(&md_path) else { return };
+    for rel in extract_local_image_refs(&content) {
+        let Ok(img_path) = crate::pathguard::join_in_root(&meta.root_path, &rel) else { continue };
+        if img_path.is_file() {
+            let _ = register_adhoc_file(conn, &meta.id, &rel);
+            let _ = ensure_indexed(conn, meta, &rel);
+        }
+    }
+}
+
+/// 提取 Markdown 正文中 `![alt](path)` 引用的本地相对路径（跳过外链 / data: / 锚点 / 绝对路径）。
+fn extract_local_image_refs(md: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(off) = md[i..].find("![") {
+        let bracket_close = match md[i + off..].find(']') {
+            Some(p) => i + off + p,
+            None => break,
+        };
+        let after = bracket_close + 1;
+        if md[after..].starts_with('(') {
+            if let Some(p) = md[after..].find(')') {
+                let inner = &md[after + 1..after + p];
+                let raw = inner.split_whitespace().next().unwrap_or("").trim_matches(|c| c == '<' || c == '>');
+                if let Some(rel) = clean_local_ref(raw) {
+                    out.push(rel);
+                }
+                i = after + p + 1;
+                continue;
+            }
+        }
+        i = bracket_close + 1;
+    }
+    out
+}
+
+/// 清理单个图片引用：拒绝外链 / data: / 绝对路径，去掉锚点与查询串，还原 `%20` 等百分号转义。
+fn clean_local_ref(raw: &str) -> Option<String> {
+    if raw.is_empty()
+        || raw.starts_with("http://")
+        || raw.starts_with("https://")
+        || raw.starts_with("data:")
+        || raw.starts_with("blob:")
+        || raw.starts_with('/')
+        || raw.contains(':')
+        || raw.contains('\\')
+    {
+        return None;
+    }
+    let clean = raw.split(['#', '?']).next().unwrap_or(raw);
+    let decoded = percent_decode(clean);
+    // 去掉 `.` 段，与前端 resolveLibraryPath 的规整方式一致，否则登记进索引的 relative_path
+    // 跟前端实际请求读取的路径不是同一个字符串，索引校验仍会判定「文件不存在于文档库索引」。
+    let normalized: Vec<&str> = decoded.split('/').filter(|s| !s.is_empty() && *s != ".").collect();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.join("/"))
+    }
+}
+
+/// 极简 `%XX` 百分号解码（Markdown 图片路径里常见的 `%20` 等），非法序列原样保留。
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn find_or_create_adhoc(conn: &Connection, parent: &str, file_name: &str) -> Result<LibraryMeta, String> {
@@ -390,5 +480,57 @@ mod tests {
         std::fs::write(&f, "x").unwrap();
         let got = paths_from_args(vec!["--flag".into(), f.to_string_lossy().to_string(), "D:/不存在.md".into()]);
         assert_eq!(got.len(), 1);
+    }
+
+    #[test]
+    fn extract_local_image_refs_skips_remote_and_data_links() {
+        let md = "![a](assets/01-处理前.jpg) ![b](http://x.com/y.png) ![c](data:image/png;base64,AAAA) ![d](./assets/带%20空格.png \"标题\") ![e](/abs.png) ![f](C:/x.png)";
+        let refs = extract_local_image_refs(md);
+        assert_eq!(refs, vec!["assets/01-处理前.jpg", "assets/带 空格.png"]); // "./" 已被规整掉
+    }
+
+    /// 回归：单文件模式打开一个随文档一起复制过来、已引用本地截图的 Markdown（典型如下载的故障处理报告）—
+    /// 此前图片从未被登记进索引，`read_file_bytes` 报「文件不存在于文档库索引」，编辑器里图片显示不出来。
+    #[test]
+    fn adhoc_open_registers_images_referenced_by_markdown() {
+        let conn = db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets").join("01-处理前.jpg"), b"fake-jpg").unwrap();
+        std::fs::write(
+            dir.path().join("report.md"),
+            "# 报告\n\n![处理前](assets/01-处理前.jpg)\n\n正文",
+        )
+        .unwrap();
+        let t = resolve(&conn, &dir.path().join("report.md").to_string_lossy()).unwrap();
+        assert!(t.adhoc);
+        // 图片已登记进索引，可以像任何已登记文件一样读取字节（对应 lib.rs 的 read_file_bytes 校验）
+        let registered: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0)",
+                params![t.library_id, "assets/01-处理前.jpg"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(registered, "Markdown 引用的本地图片应在单文件模式打开时一并登记");
+        // 重复打开（如再次双击同一文件）应保持幂等，不报错
+        resolve(&conn, &dir.path().join("report.md").to_string_lossy()).unwrap();
+    }
+
+    #[test]
+    fn adhoc_open_ignores_dangling_image_reference() {
+        // 文档引用了不存在的图片：不应报错，也不应把不存在的路径登记进索引
+        let conn = db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("report.md"), "![缺失](assets/missing.png)").unwrap();
+        let t = resolve(&conn, &dir.path().join("report.md").to_string_lossy()).unwrap();
+        let registered: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM files WHERE library_id = ?1 AND relative_path = ?2 AND is_dir = 0)",
+                params![t.library_id, "assets/missing.png"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!registered);
     }
 }
