@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-19
+
 ### Added
 
 - **在线更新与更新提示**：基于 `tauri-plugin-updater`，从 GitHub Releases 的 `latest.json` 读取最新版本。启动后延迟约 8 秒自动检查（每天最多一次，可在「设置 → 外观与启动 → 自动检查更新」关闭），有新版本时标题栏出现「有新版本」标记并弹出更新说明，可「立即更新 / 稍后提醒 / 跳过此版本」；也可用「帮助 → 检查更新…」或「设置 → 关于」手动检查。更新包经 minisign 签名校验后下载并安装，安装完成自动重新启动；有未保存修改时更新前先确认。
