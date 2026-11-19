@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **「最近打开的文件」有的不更新**：交给系统应用打开的文件（无内置查看器的格式，包括文档库里双击、搜索结果点击、右键「用系统应用打开」、详情面板「系统打开」）此前不会记入最近文件。现统一在后端 `open_path_in_system` 中记录，与编辑器 / 查看器打开共用同一个记录函数；目录与不存在的文件不记录，路径仍经库根校验。新增 1 项回归测试。
+
 ## [0.13.0] - 2026-11-19
 
 ### Added

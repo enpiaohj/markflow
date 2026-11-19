@@ -371,7 +371,9 @@ fn open_path_in_system(
 ) -> Result<(), String> {
     let root = library::get_library(&state.read(), &library_id)?.root_path;
     let path = pathguard::join_in_root(&root, &relative_path)?;
-    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("系统打开失败: {e}"))?;
+    // 交给系统应用打开的文件同样算「最近打开」（无内置查看器的格式只会走这条路径）
+    openfile::record_recent_in_library(&state.0.lock_safe(), &library_id, &relative_path)
 }
 
 /// 用外部工具打开文档库内的文件 / 目录：`tool` 为 vscode-file / vscode-folder / powershell / cmd / explorer。
@@ -418,12 +420,7 @@ fn record_recent_open(
     relative_path: String,
 ) -> Result<(), String> {
     let conn = state.0.lock_safe();
-    let root = library::get_library(&conn, &library_id)?.root_path;
-    let abs = pathguard::join_in_root(&root, &relative_path)?;
-    if abs.is_file() {
-        openfile::push_recent(&conn, &openfile::normalize(&abs));
-    }
-    Ok(())
+    openfile::record_recent_in_library(&conn, &library_id, &relative_path)
 }
 
 /// 可选组件（Pandoc / LibreOffice）健康状态。

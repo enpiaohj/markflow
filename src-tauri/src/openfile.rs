@@ -317,6 +317,16 @@ pub fn read_recent(conn: &Connection) -> Vec<RecentFile> {
         .unwrap_or_default()
 }
 
+/// 记录库内文件为「最近打开」（相对路径经库根校验；目录或不存在的文件不记录）。
+pub fn record_recent_in_library(conn: &Connection, library_id: &str, relative_path: &str) -> Result<(), String> {
+    let root = library::get_library(conn, library_id)?.root_path;
+    let abs = crate::pathguard::join_in_root(&root, relative_path)?;
+    if abs.is_file() {
+        push_recent(conn, &normalize(&abs));
+    }
+    Ok(())
+}
+
 pub fn push_recent(conn: &Connection, path: &str) {
     let mut list = read_recent(conn);
     list.retain(|r| !r.path.eq_ignore_ascii_case(path));
@@ -471,6 +481,37 @@ mod tests {
         let list = read_recent(&conn);
         assert_eq!(list.len(), MAX_RECENT_FILES);
         assert_eq!(list[0].path, "D:/F5.md");
+    }
+
+    #[test]
+    fn record_recent_in_library_tracks_files_only_and_rejects_escape() {
+        let conn = db();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("a.md"), "# a").unwrap();
+        std::fs::write(dir.path().join("sub").join("包.zip"), b"zip").unwrap();
+        let lib = create_library(
+            &conn,
+            CreateLibraryRequest {
+                root_path: dir.path().to_string_lossy().to_string(),
+                name: Some("最近文件".into()),
+                exclude_dirs: vec![],
+                full_text_index: true,
+                ocr_enabled: false,
+                portable_meta: false,
+            },
+        )
+        .unwrap();
+        record_recent_in_library(&conn, &lib.id, "a.md").unwrap();
+        record_recent_in_library(&conn, &lib.id, "sub/包.zip").unwrap(); // 无内置查看器、交给系统打开的格式
+        record_recent_in_library(&conn, &lib.id, "sub").unwrap(); // 目录不记录
+        record_recent_in_library(&conn, &lib.id, "不存在.md").unwrap(); // 不存在的文件不记录
+        record_recent_in_library(&conn, &lib.id, "a.md").unwrap(); // 再次打开：提到最前且不重复
+        let list = read_recent(&conn);
+        assert_eq!(list.len(), 2);
+        assert!(list[0].path.ends_with("/a.md"));
+        assert!(list[1].path.ends_with("/sub/包.zip"));
+        assert!(record_recent_in_library(&conn, &lib.id, "../x.md").is_err());
     }
 
     #[test]
