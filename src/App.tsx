@@ -13,6 +13,7 @@ import { LibraryProvider, TabScope, useLibrary } from "./components/LibraryConte
 import { EditorStatusProvider } from "./components/EditorStatusContext";
 import { ZoomProvider, ZoomScope } from "./components/ZoomContext";
 import { TasksProvider } from "./components/TasksContext";
+import { UpdateProvider } from "./components/UpdateContext";
 import HomeView from "./views/HomeView";
 import LibraryView from "./views/LibraryView";
 import PlaceholderView from "./views/PlaceholderView";
@@ -201,11 +202,13 @@ export default function App() {
       <DialogProvider>
         <ZoomProvider>
           <LibraryProvider>
+            <UpdateProvider>
             <TasksProvider>
               <EditorStatusProvider>
                 <Shell />
               </EditorStatusProvider>
             </TasksProvider>
+            </UpdateProvider>
           </LibraryProvider>
         </ZoomProvider>
       </DialogProvider>

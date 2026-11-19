@@ -202,3 +202,59 @@ export function initTheme(): void {
     if (getTheme() === "system") applyTheme();
   });
 }
+
+const AUTO_UPDATE_KEY = "mf-pref-auto-update-check";
+
+/** 启动时自动检查更新（默认开启；会访问 GitHub Releases，可在「设置」关闭）。 */
+export function getAutoUpdateCheck(): boolean {
+  try {
+    return localStorage.getItem(AUTO_UPDATE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setAutoUpdateCheck(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_UPDATE_KEY, on ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("markflow:prefs-changed"));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
+const LAST_UPDATE_CHECK_KEY = "mf-update-last-check";
+const SKIPPED_UPDATE_KEY = "mf-update-skipped-version";
+
+export function getLastUpdateCheck(): number | null {
+  try {
+    const v = Number(localStorage.getItem(LAST_UPDATE_CHECK_KEY));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLastUpdateCheck(at: number): void {
+  try {
+    localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(at));
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
+export function getSkippedUpdateVersion(): string | null {
+  try {
+    return localStorage.getItem(SKIPPED_UPDATE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setSkippedUpdateVersion(version: string): void {
+  try {
+    localStorage.setItem(SKIPPED_UPDATE_KEY, version);
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}

@@ -13,7 +13,7 @@
 
 ## 安全设计要点
 
-- 所有文件操作在本地完成；应用不收集遥测，唯一的对外请求来自用户自行配置的 AI Provider。
+- 所有文件操作在本地完成；应用不收集遥测；对外请求只有用户自行配置的 AI Provider，以及读取 GitHub Releases 上公开版本清单的「检查更新」（可在设置中关闭，更新包经 minisign 签名校验）。
 - Pandoc / LibreOffice / Edge 等外部工具以参数数组调用（无 Shell 拼接）、带超时、独立临时目录。
 - API Key 存于 Windows 凭据库，不落库、不回传前端。
 - 窗口与文件系统能力按最小权限授权（`src-tauri/capabilities/`）。

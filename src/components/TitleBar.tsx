@@ -6,6 +6,7 @@ import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import TabStrip from "./TabStrip";
 import MenuBar from "./MenuBar";
+import { useUpdate } from "./UpdateContext";
 
 const appWindow = getCurrentWindow();
 
@@ -46,6 +47,7 @@ export default function TitleBar() {
     void api.appInfo().then((i) => setVersion(i.version)).catch(() => {});
   }, []);
   const dialog = useDialog();
+  const update = useUpdate();
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function handleSwitch(id: string) {
@@ -87,6 +89,17 @@ export default function TitleBar() {
           <span data-tauri-drag-region className="hidden shrink-0 whitespace-nowrap text-[11px] text-gray-400 xl:inline" title={`MarkFlow v${version}`}>
             v{version}
           </span>
+        )}
+        {update.info && (
+          <button
+            type="button"
+            onClick={update.openDialog}
+            title={`发现新版本 v${update.info.version}，点击查看并更新`}
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700 hover:bg-primary-100"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-primary-600" />
+            有新版本
+          </button>
         )}
         <span className="mx-1 h-4 w-px shrink-0 bg-gray-200" aria-hidden="true" />
         <MenuBar />

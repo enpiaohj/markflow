@@ -18,6 +18,7 @@ import {
 import { SettingGroup, SettingRow, Segmented, Toggle } from "../components/settings/ui";
 import { useDialog } from "../components/DialogContext";
 import { useLibrary } from "../components/LibraryContext";
+import { useUpdate } from "../components/UpdateContext";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../lib/api";
 import {
@@ -37,6 +38,8 @@ import {
   getShowDetailsPreview,
   setShowDetailsPreview,
   setAutosave,
+  getAutoUpdateCheck,
+  setAutoUpdateCheck,
   setOfficeEngine,
   setTheme,
   type OfficeEnginePref,
@@ -67,7 +70,7 @@ const SHORTCUTS = [
 ];
 
 /** 「外观与启动」页里，启动与窗口行为单独成组 */
-const STARTUP_LABELS = new Set(["开机启动", "关闭窗口时最小化到通知区域"]);
+const STARTUP_LABELS = new Set(["开机启动", "关闭窗口时最小化到通知区域", "自动检查更新"]);
 
 interface SimpleRow {
   section: SectionId;
@@ -118,6 +121,8 @@ export default function SettingsView() {
   const [largeMb, setLargeMb] = useState(getLargeFileMb());
   const [maxMb, setMaxMb] = useState(getMaxEditMb());
   const [layout, setLayoutState] = useState<LibraryLayoutPref>(getLibraryLayout());
+  const update = useUpdate();
+  const [autoUpdate, setAutoUpdate] = useState(getAutoUpdateCheck());
   const [maxListRender, setMaxListRenderState] = useState(getMaxListRender());
   const [detailsPreview, setDetailsPreviewState] = useState(getShowDetailsPreview());
   const [autosave, setAutosaveState] = useState(getAutosave());
@@ -228,6 +233,7 @@ export default function SettingsView() {
   const AUTOSTART_DESC = "登录 Windows 后自动启动 MarkFlow（在后台启动：开启「关闭时最小化到通知区域」则驻留通知区域，否则最小化到任务栏）。";
   const TRAY_DESC = "点击关闭按钮只隐藏窗口，应用继续在后台运行；点击通知区域图标恢复，右键菜单选择「退出」才会真正退出。";
   const THEME_DESC = "浅色为默认；深色适合弱光环境；跟随系统会随 Windows 的应用模式自动切换。文档页面（Word / Excel / PPT / PDF）始终保持白纸底色。";
+  const UPDATE_DESC = "启动时检查 GitHub 上是否有新版本（每天最多一次），有新版本时在标题栏提示，由你决定是否更新。这是 MarkFlow 除 AI 外唯一的对外请求，只读取公开的版本信息，不上传任何数据。关闭后仍可在「帮助 → 检查更新」手动检查。";
   const AUTOSAVE_DESC = "编辑器停止输入 3 秒后自动保存（保存前仍会创建历史快照；异常退出的草稿始终会保留）。";
   const ENGINE_DESC =
     "内置渲染（默认）：即时显示、有目录导航，不启动 Office，保真度略低。自动：装有 Microsoft Office / LibreOffice 时优先用它们导出的精确版式（首次需几秒）。Excel 始终使用原生表格；预览工具栏的「内置渲染 | Office 版式」可随时对当前文档切换。";
@@ -256,6 +262,24 @@ export default function SettingsView() {
             checked={shell?.closeToTray ?? false}
             disabled={!shell || shellBusy}
             onChange={(v) => void changeShell("closeToTray", v)}
+          />
+        </SettingRow>
+      ),
+    },
+    {
+      section: "appearance",
+      label: "自动检查更新",
+      description: UPDATE_DESC,
+      keywords: "更新 升级 版本 检查 update",
+      node: (
+        <SettingRow key="autoupdate" label="自动检查更新" description={UPDATE_DESC}>
+          <Toggle
+            label="自动检查更新"
+            checked={autoUpdate}
+            onChange={(v) => {
+              setAutoUpdateCheck(v);
+              setAutoUpdate(v);
+            }}
           />
         </SettingRow>
       ),
@@ -640,6 +664,29 @@ export default function SettingsView() {
             <AboutRow label="版本">
               <span className="tabular-nums text-gray-800">{version ? `v${version}` : "—"}</span>
             </AboutRow>
+            <AboutRow label="更新">
+              <span className="text-gray-800">
+                {update.status === "checking"
+                  ? "正在检查…"
+                  : update.info
+                    ? `发现新版本 v${update.info.version}`
+                    : "当前为已发布的版本"}
+              </span>
+              {update.info ? (
+                <button type="button" onClick={update.openDialog} className="ml-2 text-primary-600 hover:underline">
+                  查看并更新
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={update.status !== "idle"}
+                  onClick={() => void update.checkNow()}
+                  className="ml-2 text-primary-600 hover:underline disabled:opacity-40"
+                >
+                  检查更新
+                </button>
+              )}
+            </AboutRow>
             <AboutRow label="开发者">
               <span className="inline-flex items-center gap-1 text-gray-800">
                 <User className="h-3.5 w-3.5 text-gray-400" />
@@ -661,8 +708,9 @@ export default function SettingsView() {
           <h3 className="text-sm font-semibold text-gray-900">隐私与数据</h3>
           <p className="mt-2 text-xs leading-relaxed text-gray-500">
             MarkFlow 不收集遥测、崩溃报告或使用统计，不会向开发者或任何第三方发送使用数据。你的文档始终保存在原位置；
-            索引数据库与预览缓存保存在本机应用数据目录（%APPDATA%\com.markflow.app）。唯一的对外请求来自 AI 功能：
-            只有当你在「AI」中配置了 Provider 并主动使用时，才会把你选择的上下文发送到你配置的服务地址。
+            索引数据库与预览缓存保存在本机应用数据目录（%APPDATA%\com.markflow.app）。对外请求只有两类：
+            ① AI 功能：只有当你在「AI」中配置了 Provider 并主动使用时，才会把你选择的上下文发送到你配置的服务地址；
+            ② 检查更新：访问 GitHub 上公开的版本信息文件，不携带任何文档或个人数据，可在「设置 → 外观与启动」关闭。
           </p>
           <div className="mt-8" />
           <SettingGroup title="快捷键">

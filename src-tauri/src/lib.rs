@@ -1325,6 +1325,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(library::init_db(app.handle())?);
             app.manage(WatchState(std::sync::Mutex::new(std::collections::HashMap::new())));

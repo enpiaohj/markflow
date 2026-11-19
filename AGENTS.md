@@ -57,6 +57,7 @@ Rust 工具链为 MSVC：需 rustup（stable-x86_64-pc-windows-msvc）与 VS Bui
 - 窗口控制、文件系统等系统能力必须走 Tauri 能力权限（`src-tauri/capabilities/`），按需最小授权；界面启用严格 CSP（`tauri.conf.json`），新增外部资源来源须同步评估。
 - 「库根 + 前端传来的相对路径」一律经 `src-tauri/src/pathguard.rs` 的 `join_in_root` 拼接（拒绝绝对路径 / `..` / 盘符），禁止直接 `Path::join`。
 - 数据库：写入与事务走 `state.0`（唯一写连接）；纯读取走 `state.read()`（只读连接池，不被扫描 / 保存等写事务阻塞）。Mutex 加锁用 `lock_safe()`，不用 `.lock().unwrap()`。
+- 在线更新：`tauri-plugin-updater` + GitHub Releases 的 `latest.json`，更新包 minisign 签名；公钥在 `tauri.conf.json` → `plugins.updater.pubkey`，**私钥只放 `~/.tauri/`，不得入库 / 写入日志 / 放进 Release**；改动更新端点或公钥等于改变信任根，须单独评估。
 - 新增 Tauri 命令放 `src-tauri/src/`，在 `lib.rs` 的 `invoke_handler` 注册。
 - 不隐藏 Error / Warning；构建或测试失败时定位根因，不得删测试绕过。
 

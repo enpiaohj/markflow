@@ -6,6 +6,7 @@ import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import type { LibraryMeta } from "../lib/types";
 import { useZoom } from "./ZoomContext";
+import { useUpdate } from "./UpdateContext";
 
 /** 编辑器等组件通过该事件响应菜单命令（保存等） */
 export const MENU_SAVE_EVENT = "markflow:save";
@@ -63,6 +64,7 @@ export default function MenuBar() {
     confirmDiscard,
   } = useLibrary();
   const dialog = useDialog();
+  const update = useUpdate();
   const { config: zoom, zoomIn, zoomOut, reset } = useZoom();
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [recent, setRecent] = useState<RecentFile[]>([]);
@@ -241,6 +243,7 @@ export default function MenuBar() {
       label: "帮助",
       items: [
         { label: "快捷键", onClick: () => void dialog.alert(SHORTCUTS_HELP, "快捷键") },
+        { label: "检查更新…", onClick: () => void update.checkNow(), disabled: update.status === "checking" || update.status === "downloading" || update.status === "installing" },
         {
           label: "关于 MarkFlow",
           onClick: () => {
