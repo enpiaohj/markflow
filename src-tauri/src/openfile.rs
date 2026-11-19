@@ -327,18 +327,37 @@ pub fn record_recent_in_library(conn: &Connection, library_id: &str, relative_pa
     Ok(())
 }
 
-pub fn push_recent(conn: &Connection, path: &str) {
-    let mut list = read_recent(conn);
-    list.retain(|r| !r.path.eq_ignore_ascii_case(path));
-    list.insert(0, RecentFile { path: path.to_string(), opened_at: library::now_millis() });
-    list.truncate(MAX_RECENT_FILES);
-    if let Ok(json) = serde_json::to_string(&list) {
+fn save_recent(conn: &Connection, list: &[RecentFile]) {
+    if let Ok(json) = serde_json::to_string(list) {
         let _ = conn.execute(
             "INSERT INTO settings (key, value) VALUES ('recent_files', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [json],
         );
     }
+}
+
+pub fn push_recent(conn: &Connection, path: &str) {
+    let mut list = read_recent(conn);
+    list.retain(|r| !r.path.eq_ignore_ascii_case(path));
+    list.insert(0, RecentFile { path: path.to_string(), opened_at: library::now_millis() });
+    list.truncate(MAX_RECENT_FILES);
+    save_recent(conn, &list);
+}
+
+/// 从「最近打开」里移除一项（只删记录，不动磁盘文件）。
+pub fn remove_recent(conn: &Connection, path: &str) {
+    let mut list = read_recent(conn);
+    let before = list.len();
+    list.retain(|r| !r.path.eq_ignore_ascii_case(path));
+    if list.len() != before {
+        save_recent(conn, &list);
+    }
+}
+
+/// 清空「最近打开」（只删记录，不动磁盘文件）。
+pub fn clear_recent(conn: &Connection) {
+    save_recent(conn, &[]);
 }
 
 #[cfg(test)]
@@ -512,6 +531,31 @@ mod tests {
         assert!(list[0].path.ends_with("/a.md"));
         assert!(list[1].path.ends_with("/sub/包.zip"));
         assert!(record_recent_in_library(&conn, &lib.id, "../x.md").is_err());
+    }
+
+    #[test]
+    fn remove_and_clear_recent_only_touch_the_list() {
+        let conn = db();
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        push_recent(&conn, "D:/x/A.md");
+        push_recent(&conn, "D:/x/b.md");
+        push_recent(&conn, "D:/x/c.md");
+        remove_recent(&conn, "d:/x/a.MD"); // 大小写不敏感，与去重规则一致
+        let paths: Vec<String> = read_recent(&conn).into_iter().map(|r| r.path).collect();
+        assert_eq!(paths, vec!["D:/x/c.md", "D:/x/b.md"]);
+        remove_recent(&conn, "D:/x/不存在.md"); // 不在列表里：无副作用
+        assert_eq!(read_recent(&conn).len(), 2);
+        clear_recent(&conn);
+        assert!(read_recent(&conn).is_empty());
+        // 只清记录：磁盘文件仍在
+        assert!(a.is_file() && b.is_file());
+        // 清空后可正常继续记录
+        push_recent(&conn, "D:/x/d.md");
+        assert_eq!(read_recent(&conn).len(), 1);
     }
 
     #[test]

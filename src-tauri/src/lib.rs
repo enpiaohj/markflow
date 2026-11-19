@@ -42,6 +42,18 @@ fn open_file_path(state: State<'_, AppState>, path: String) -> Result<openfile::
     Ok(target)
 }
 
+/// 从「最近打开」移除一项（只删记录，不删文件）。
+#[tauri::command]
+fn remove_recent_file(state: State<'_, AppState>, path: String) {
+    openfile::remove_recent(&state.0.lock_safe(), &path);
+}
+
+/// 清空「最近打开」（只删记录，不删文件）。
+#[tauri::command]
+fn clear_recent_files(state: State<'_, AppState>) {
+    openfile::clear_recent(&state.0.lock_safe());
+}
+
 /// 取走启动参数 / 二次启动传来的待打开文件路径（前端就绪后调用一次）。
 #[tauri::command]
 fn take_pending_open_paths(pending: State<'_, openfile::PendingOpen>) -> Vec<String> {
@@ -1369,6 +1381,8 @@ pub fn run() {
             pptx_export_slides,
             read_preview_slide,
             record_recent_open,
+            remove_recent_file,
+            clear_recent_files,
             stat_file_mtime,
             list_libraries,
             quick_scan_library,

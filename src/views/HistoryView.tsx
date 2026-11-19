@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { FileText, FolderOpen, History, Loader2, Undo2 } from "lucide-react";
+import { FileText, FolderOpen, History, Loader2, Undo2, X } from "lucide-react";
 import FileTypeIcon from "../components/FileTypeIcon";
 import { useDialog } from "../components/DialogContext";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { formatSize, formatTime } from "../lib/format";
+import { confirmClearRecentFiles } from "../lib/recent";
 import type { RecentFile, VersionInfo } from "../lib/types";
 
 /**
@@ -44,6 +45,19 @@ export default function HistoryView() {
       .catch(() => setRecent([]));
   }, [current]);
 
+  async function removeRecent(path: string) {
+    setRecent((list) => (list ? list.filter((r) => r.path !== path) : list));
+    await api.removeRecentFile(path).catch((err) => console.error("移除最近文件失败", err));
+  }
+
+  async function clearRecent() {
+    try {
+      if (await confirmClearRecentFiles(dialog)) setRecent([]);
+    } catch (err) {
+      console.error("清空最近文件失败", err);
+    }
+  }
+
   async function restore(v: VersionInfo) {
     if (!current || v.relativePath === null) return;
     const ok = await dialog.confirm({
@@ -75,6 +89,11 @@ export default function HistoryView() {
       <p className="mb-2 mt-5 flex items-center gap-1.5 text-sm font-medium text-gray-700">
         <FileText className="h-4 w-4 text-gray-400" />
         最近打开的文档
+        {recent !== null && recent.length > 0 && (
+          <button type="button" onClick={() => void clearRecent()} title="清空列表（不会删除文件）" className="ml-auto text-xs font-normal text-gray-400 hover:text-gray-600 hover:underline">
+            清空
+          </button>
+        )}
       </p>
       {recent === null ? (
         <div className="flex h-16 items-center justify-center text-gray-400">
@@ -87,11 +106,11 @@ export default function HistoryView() {
       ) : (
         <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
           {recent.map((f) => (
-            <li key={f.path}>
+            <li key={f.path} className="group flex items-center hover:bg-primary-50/50">
               <button
                 type="button"
                 onClick={() => void openPath(f.path)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-primary-50/50"
+                className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left"
               >
                 <FileTypeIcon format="other" name={f.path.split(/[\\/]/).pop() ?? f.path} size="sm" />
                 <span className="min-w-0 flex-1">
@@ -101,6 +120,15 @@ export default function HistoryView() {
                   <span className="block truncate text-[11px] text-gray-400">{f.path}</span>
                 </span>
                 <span className="shrink-0 text-[11px] text-gray-400">{formatTime(f.openedAt)}</span>
+              </button>
+              <button
+                type="button"
+                title="从列表移除（不会删除文件）"
+                aria-label="从最近打开的文档中移除"
+                onClick={() => void removeRecent(f.path)}
+                className="mr-2 shrink-0 rounded-md p-1.5 text-gray-300 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100"
+              >
+                <X className="h-3.5 w-3.5" />
               </button>
             </li>
           ))}

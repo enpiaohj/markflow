@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **最近打开的文件可移除、可清空**：「开始」页与「历史」页每一行悬停显示「×」，只移除该项；标题行新增「清空」，「文件 → 最近打开的文件」子菜单底部新增「清空最近文件」，清空前先确认并说明只清除列表、不删除文件。新增后端命令 `remove_recent_file` / `clear_recent_files`，新增 1 项 Rust 测试与 5 项前端测试。
+
 ## [0.13.1] - 2026-11-19
 
 ### Fixed

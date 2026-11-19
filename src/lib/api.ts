@@ -119,6 +119,16 @@ export function recordRecentOpen(libraryId: string, relativePath: string): Promi
   return invoke("record_recent_open", { libraryId, relativePath });
 }
 
+/** 从最近打开里移除一项（只删记录，不删文件） */
+export function removeRecentFile(path: string): Promise<void> {
+  return invoke("remove_recent_file", { path });
+}
+
+/** 清空最近打开（只删记录，不删文件） */
+export function clearRecentFiles(): Promise<void> {
+  return invoke("clear_recent_files");
+}
+
 export function listRecentFiles(): Promise<RecentFile[]> {
   return invoke("list_recent_files");
 }

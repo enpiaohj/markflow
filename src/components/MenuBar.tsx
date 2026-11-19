@@ -6,6 +6,7 @@ import { useDialog } from "./DialogContext";
 import { useLibrary } from "./LibraryContext";
 import type { LibraryMeta } from "../lib/types";
 import { useZoom } from "./ZoomContext";
+import { confirmClearRecentFiles } from "../lib/recent";
 import { useUpdate } from "./UpdateContext";
 
 /** 编辑器等组件通过该事件响应菜单命令（保存等） */
@@ -190,10 +191,20 @@ export default function MenuBar() {
         {
           label: "最近打开的文件",
           disabled: recent.length === 0,
-          children: recent.map((r) => ({
-            label: fileName(r.path),
-            onClick: () => void openPath(r.path),
-          })),
+          children: [
+            ...recent.map((r) => ({
+              label: fileName(r.path),
+              onClick: () => void openPath(r.path),
+            })),
+            { separator: true },
+            {
+              label: "清空最近文件",
+              onClick: () =>
+                void confirmClearRecentFiles(dialog)
+                  .then((cleared) => cleared && setRecent([]))
+                  .catch((err) => console.error("清空最近文件失败", err)),
+            },
+          ],
         },
         { separator: true },
         { label: "添加文档库…", onClick: openWizard },
@@ -286,19 +297,23 @@ export default function MenuBar() {
                     </div>
                     {!item.disabled && (
                       <div className="absolute left-full top-0 hidden max-h-80 w-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl group-hover:block">
-                        {item.children.map((c, k) => (
-                          <button
-                            key={k}
-                            type="button"
-                            onClick={() => {
-                              setOpenMenu(null);
-                              c.onClick?.();
-                            }}
-                            className="block w-full truncate px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-                          >
-                            {c.label}
-                          </button>
-                        ))}
+                        {item.children.map((c, k) =>
+                          c.separator ? (
+                            <div key={k} className="my-1 h-px bg-gray-100" />
+                          ) : (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() => {
+                                setOpenMenu(null);
+                                c.onClick?.();
+                              }}
+                              className="block w-full truncate px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                            >
+                              {c.label}
+                            </button>
+                          ),
+                        )}
                       </div>
                     )}
                   </div>

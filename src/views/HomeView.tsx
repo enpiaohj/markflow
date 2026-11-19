@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, FolderPlus, Clock, FileText } from "lucide-react";
+import { FolderOpen, FolderPlus, Clock, FileText, X } from "lucide-react";
 import FileTypeIcon from "../components/FileTypeIcon";
+import { useDialog } from "../components/DialogContext";
 import { useLibrary } from "../components/LibraryContext";
 import * as api from "../lib/api";
 import { formatTime } from "../lib/format";
+import { confirmClearRecentFiles } from "../lib/recent";
 import type { RecentFile } from "../lib/types";
 
 /** 开始页每个区块最多显示的条数：常见窗口高度下首屏完整显示、不裁切；更多内容经「查看全部」进入对应页面 */
@@ -13,11 +15,25 @@ const MAX_RECENT_FILES = 4;
 /** 「开始」页：最近文档库与快速动作 */
 export default function HomeView() {
   const { libraries, current, switchToLibrary, openWizard, pickAndOpenFile, openPath, openManager, requestView } = useLibrary();
+  const dialog = useDialog();
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
 
   useEffect(() => {
     void api.listRecentFiles().then(setRecentFiles).catch(() => setRecentFiles([]));
   }, []);
+
+  async function removeRecent(path: string) {
+    setRecentFiles((list) => list.filter((r) => r.path !== path));
+    await api.removeRecentFile(path).catch((err) => console.error("移除最近文件失败", err));
+  }
+
+  async function clearRecent() {
+    try {
+      if (await confirmClearRecentFiles(dialog)) setRecentFiles([]);
+    } catch (err) {
+      console.error("清空最近文件失败", err);
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -127,23 +143,24 @@ export default function HomeView() {
           <p className="mb-2.5 mt-6 flex items-center gap-1.5 text-sm font-medium text-gray-700">
             <FileText className="h-4 w-4 text-gray-400" />
             最近打开的文件
-            {recentFiles.length > MAX_RECENT_FILES && (
-              <button
-                type="button"
-                onClick={() => requestView("history")}
-                className="ml-auto text-xs font-normal text-primary-600 hover:underline"
-              >
-                查看全部
+            <span className="ml-auto flex items-center gap-3 text-xs font-normal">
+              {recentFiles.length > MAX_RECENT_FILES && (
+                <button type="button" onClick={() => requestView("history")} className="text-primary-600 hover:underline">
+                  查看全部
+                </button>
+              )}
+              <button type="button" onClick={() => void clearRecent()} title="清空列表（不会删除文件）" className="text-gray-400 hover:text-gray-600 hover:underline">
+                清空
               </button>
-            )}
+            </span>
           </p>
           <ul className="shrink-0 divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white">
             {recentFiles.slice(0, MAX_RECENT_FILES).map((f) => (
-              <li key={f.path}>
+              <li key={f.path} className="group flex items-center hover:bg-primary-50/50">
                 <button
                   type="button"
                   onClick={() => void openPath(f.path)}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-primary-50/50"
+                  className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left"
                 >
                   <FileTypeIcon format="other" name={f.path.split(/[\\/]/).pop() ?? f.path} size="sm" />
                   <span className="min-w-0 flex-1">
@@ -151,6 +168,15 @@ export default function HomeView() {
                     <span className="block truncate text-xs text-gray-400">{f.path}</span>
                   </span>
                   <span className="shrink-0 text-xs text-gray-400">{formatTime(f.openedAt)}</span>
+                </button>
+                <button
+                  type="button"
+                  title="从列表移除（不会删除文件）"
+                  aria-label="从最近打开的文件中移除"
+                  onClick={() => void removeRecent(f.path)}
+                  className="mr-2 shrink-0 rounded-md p-1.5 text-gray-300 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </li>
             ))}
